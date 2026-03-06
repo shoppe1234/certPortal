@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block title %}certPortal — Validation Errors{% endblock %}
+{% block fonts %}<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">{% endblock %}
+
+{% block nav_links %}
+<li><a href="/" class="nav-link">Home</a></li>
+<li><a href="/scenarios" class="nav-link">Scenarios</a></li>
+<li><a href="/errors" class="nav-link active">Errors</a></li>
+<li><a href="/patches" class="nav-link">Patches</a></li>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1 class="page-title">Validation Errors</h1>
+  <p class="page-subtitle">
+    Errors found in your EDI submissions.
+    {% if error_groups %}Ryan's fix suggestions appear below each error.{% endif %}
+  </p>
+</div>
+
+{% if error_groups %}
+  {% for group in error_groups %}
+  <section class="error-group">
+    <div class="error-group-header">
+      <h2 class="error-group-title">
+        Transaction {{ group.transaction_type }}
+        <span class="error-count badge-error">{{ group.errors | length }} error(s)</span>
+      </h2>
+      <span class="error-time text-muted text-sm">
+        Validated: {{ group.validated_at.strftime('%Y-%m-%d %H:%M') if group.validated_at else '—' }}
+      </span>
+    </div>
+
+    {% for error in group.errors %}
+    <details class="error-card error-card--{{ error.severity | lower }}" {% if loop.first %}open{% endif %}>
+      <summary class="error-card-summary">
+        <div class="error-card-left">
+          <span class="error-severity error-severity--{{ error.severity | lower }}">{{ error.severity }}</span>
+          <span class="error-code mono">{{ error.code }}</span>
+          <span class="error-segment mono">{{ error.segment }}{% if error.element %}·{{ error.element }}{% endif %}</span>
+        </div>
+        <span class="error-message-preview">{{ error.message | truncate(60) }}</span>
+      </summary>
+
+      <div class="error-card-body">
+        <div class="error-detail">
+          <h4 class="error-detail-label">Error Detail</h4>
+          <p class="error-detail-text">{{ error.message }}</p>
+        </div>
+
+        <!-- Ryan's patches for this error -->
+        {% set matching_patches = group.patches | selectattr('error_code', 'equalto', error.code) | list %}
+        {% if matching_patches %}
+        <div class="patch-section">
+          <h4 class="patch-section-label">🔧 Ryan's Fix</h4>
+          {% for patch in matching_patches %}
+          <div class="patch-suggestion {% if patch.applied %}patch-suggestion--applied{% endif %}">
+            <p class="patch-summary">{{ patch.summary }}</p>
+            {% if patch.applied %}
+            <span class="patch-applied-badge">✓ Applied</span>
+            {% else %}
+            <button class="btn btn-xs btn-success"
+                    hx-post="/patches/{{ patch.id }}/mark-applied"
+                    hx-target="closest .patch-suggestion"
+                    hx-swap="outerHTML">
+              Mark as Applied
+            </button>
+            {% endif %}
+          </div>
+          {% endfor %}
+        </div>
+        {% else %}
+        <div class="patch-section">
+          <p class="text-muted text-sm">No patch suggestion yet. Ryan may need more information — check the HITL queue.</p>
+        </div>
+        {% endif %}
+      </div>
+    </details>
+    {% endfor %}
+  </section>
+  {% endfor %}
+
+{% else %}
+<div class="empty-state">
+  <div class="empty-icon">✅</div>
+  <h2 class="empty-title">No errors found!</h2>
+  <p class="empty-text">All your submitted EDI scenarios are passing. Check your <a href="/scenarios">scenarios</a> for full details.</p>
+</div>
+{% endif %}
+{% endblock %}

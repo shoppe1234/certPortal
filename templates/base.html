@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en" data-portal="{{ portal_name }}">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}certPortal{% endblock %}</title>
+
+  <!-- HTMX -->
+  <script src="https://unpkg.com/htmx.org@1.9.12" integrity="sha384-SKgr/SSmkAKe3B4t5GFl+V3HnXKN/UQhYsWTq8Z0F8qrfbpzCJM2D2G9BFvABi" crossorigin="anonymous"></script>
+
+  <!-- Per-portal Google Fonts -->
+  {% block fonts %}{% endblock %}
+
+  <!-- Portal-specific stylesheet -->
+  <link rel="stylesheet" href="/static/css/{{ portal_name }}.css">
+  {% block extra_css %}{% endblock %}
+</head>
+<body class="portal-{{ portal_name }}">
+
+  <!-- Navigation -->
+  <nav class="nav" role="navigation" aria-label="Primary navigation">
+    <div class="nav-brand">
+      <span class="nav-logo">certPortal</span>
+      <span class="nav-portal-label">{{ portal_name | upper }}</span>
+    </div>
+    <ul class="nav-links">
+      {% block nav_links %}{% endblock %}
+    </ul>
+    <div class="nav-right">
+      <span class="nav-time" id="nav-clock"
+            hx-get="/health" hx-trigger="every 60s" hx-swap="none">
+      </span>
+    </div>
+  </nav>
+
+  <!-- Flash messages -->
+  {% if messages %}
+  <div class="flash-container" aria-live="polite">
+    {% for msg in messages %}
+    <div class="flash flash-{{ msg.level }}">{{ msg.text }}</div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <!-- Main content -->
+  <main class="main-content" role="main">
+    {% block content %}{% endblock %}
+  </main>
+
+  <!-- Footer -->
+  <footer class="footer">
+    <span>certPortal v1.0.0</span>
+    <span class="footer-sep">·</span>
+    <span>{{ portal_name | upper }} Portal</span>
+  </footer>
+
+  <script src="/static/js/htmx_helpers.js"></script>
+  {% block extra_js %}{% endblock %}
+</body>
+</html>

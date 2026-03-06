@@ -1,0 +1,8 @@
+{% if result %}
+<span class="scenario-status-inline status-{{ result.status | lower }}">
+  {% if result.status == 'PASS' %}✓{% elif result.status == 'FAIL' %}✕{% else %}⚠{% endif %}
+  {{ result.status }}
+</span>
+{% else %}
+<span class="scenario-status-inline status-unknown">No result</span>
+{% endif %}

@@ -1,0 +1,10 @@
+<tr id="srow-{{ supplier.supplier_slug }}"
+    hx-get="/htmx/supplier-status/{{ supplier.supplier_slug }}"
+    hx-trigger="every 30s"
+    hx-swap="outerHTML">
+  <td class="font-medium">{{ supplier.supplier_slug }}</td>
+  <td><span class="gate-pill gate-{{ supplier.gate_1 | lower }}">{{ supplier.gate_1 }}</span></td>
+  <td><span class="gate-pill gate-{{ supplier.gate_2 | lower }}">{{ supplier.gate_2 }}</span></td>
+  <td><span class="gate-pill gate-{{ supplier.gate_3 | lower }}">{{ supplier.gate_3 }}</span></td>
+  <td class="text-muted text-sm">{{ supplier.last_updated.strftime('%Y-%m-%d %H:%M') if supplier.last_updated else '—' }}</td>
+</tr>

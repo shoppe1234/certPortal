@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}certPortal — Test Scenarios{% endblock %}
+{% block fonts %}<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">{% endblock %}
+
+{% block nav_links %}
+<li><a href="/" class="nav-link">Home</a></li>
+<li><a href="/scenarios" class="nav-link active">Scenarios</a></li>
+<li><a href="/errors" class="nav-link">Errors</a></li>
+<li><a href="/patches" class="nav-link">Patches</a></li>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1 class="page-title">Test Scenarios</h1>
+  <p class="page-subtitle">All EDI test runs submitted for validation. Each scenario must pass before proceeding to Gate 2.</p>
+</div>
+
+{% if scenarios %}
+<div class="scenario-list">
+  {% for s in scenarios %}
+  <div class="scenario-card scenario-card--{{ s.status | lower }}">
+    <div class="scenario-header">
+      <div class="scenario-meta">
+        <span class="scenario-tx">{{ s.transaction_type }}</span>
+        <span class="scenario-channel">{{ s.channel }}</span>
+        <span class="scenario-retailer text-muted">{{ s.retailer_slug }}</span>
+      </div>
+      <span class="scenario-status status-{{ s.status | lower }}">
+        {% if s.status == 'PASS' %}✓ PASS{% elif s.status == 'FAIL' %}✕ FAIL{% else %}⚠ PARTIAL{% endif %}
+      </span>
+    </div>
+    <div class="scenario-footer">
+      <span class="scenario-time text-muted text-sm">
+        {{ s.validated_at.strftime('%Y-%m-%d %H:%M') if s.validated_at else '—' }}
+      </span>
+      {% if s.status != 'PASS' %}
+      <a href="/errors?supplier_slug={{ s.supplier_slug }}" class="btn btn-xs btn-warning">
+        View Errors →
+      </a>
+      {% endif %}
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="empty-state">
+  <div class="empty-icon">📋</div>
+  <h2 class="empty-title">No test scenarios yet</h2>
+  <p class="empty-text">Submit your EDI test files to get started. Your retailer will provide the test scenario requirements.</p>
+</div>
+{% endif %}
+
+<!-- Legend -->
+<div class="legend">
+  <h3 class="legend-title">Status Guide</h3>
+  <div class="legend-items">
+    <span class="legend-item"><span class="status-dot status-pass">✓</span> PASS — Scenario meets all requirements</span>
+    <span class="legend-item"><span class="status-dot status-partial">⚠</span> PARTIAL — Warnings found, review needed</span>
+    <span class="legend-item"><span class="status-dot status-fail">✕</span> FAIL — Errors found, see Ryan's patches</span>
+  </div>
+</div>
+{% endblock %}

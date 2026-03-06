@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block title %}certPortal Retailer — Supplier Status{% endblock %}
+{% block fonts %}<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">{% endblock %}
+
+{% block nav_links %}
+<li><a href="/" class="nav-link">Home</a></li>
+<li><a href="/spec-setup" class="nav-link">Spec Setup</a></li>
+<li><a href="/yaml-wizard" class="nav-link">YAML Wizard</a></li>
+<li><a href="/supplier-status" class="nav-link active">Supplier Status</a></li>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1 class="page-title">Supplier Certification Status</h1>
+  <p class="page-subtitle">{{ suppliers | length }} supplier(s) in the certification pipeline.</p>
+</div>
+
+{% if suppliers %}
+<div class="table-scroll">
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Supplier</th>
+        <th>Gate 1 <span class="th-hint">Spec</span></th>
+        <th>Gate 2 <span class="th-hint">Validation</span></th>
+        <th>Gate 3 <span class="th-hint">Certification</span></th>
+        <th>Tests Passed</th>
+        <th>Tests Failed</th>
+        <th>Last Activity</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for s in suppliers %}
+      <tr id="srow-{{ s.supplier_slug }}"
+          hx-get="/htmx/supplier-status/{{ s.supplier_slug }}"
+          hx-trigger="every 30s"
+          hx-swap="outerHTML">
+        <td class="font-medium">{{ s.supplier_slug }}</td>
+        <td>
+          <span class="gate-pill gate-{{ s.gate_1 | lower }}">{{ s.gate_1 }}</span>
+        </td>
+        <td>
+          <span class="gate-pill gate-{{ s.gate_2 | lower }}">{{ s.gate_2 }}</span>
+        </td>
+        <td>
+          <span class="gate-pill gate-{{ s.gate_3 | lower }}">{{ s.gate_3 }}</span>
+        </td>
+        <td class="text-success font-medium">{{ s.pass_count }}</td>
+        <td class="{% if s.fail_count > 0 %}text-error{% else %}text-muted{% endif %}">{{ s.fail_count }}</td>
+        <td class="text-muted text-sm">{{ s.last_updated.strftime('%Y-%m-%d %H:%M') if s.last_updated else '—' }}</td>
+        <td>
+          {% if s.gate_1 == 'PENDING' %}
+          <button class="btn btn-sm btn-primary"
+                  hx-post="/suppliers/{{ s.supplier_slug }}/approve-gate/1"
+                  hx-target="#srow-{{ s.supplier_slug }}"
+                  hx-confirm="Approve Gate 1 for {{ s.supplier_slug }}?">
+            Approve G1
+          </button>
+          {% elif s.gate_2 == 'PENDING' %}
+          <button class="btn btn-sm btn-primary"
+                  hx-post="/suppliers/{{ s.supplier_slug }}/approve-gate/2"
+                  hx-confirm="Approve Gate 2 for {{ s.supplier_slug }}?">
+            Approve G2
+          </button>
+          {% elif s.gate_3 == 'CERTIFIED' %}
+          <span class="certified-badge">✓ Certified</span>
+          {% else %}
+          <span class="text-muted text-sm">Awaiting admin</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="empty-state">
+  <div class="empty-icon">🔍</div>
+  <p>No suppliers in the pipeline yet. Suppliers join when they access the Chrissy portal.</p>
+</div>
+{% endif %}
+{% endblock %}

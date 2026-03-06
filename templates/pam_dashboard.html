@@ -1,0 +1,126 @@
+{% extends "base.html" %}
+
+{% block title %}certPortal Admin — Dashboard{% endblock %}
+
+{% block fonts %}
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;700&family=IBM+Plex+Sans:wght@400;500&display=swap" rel="stylesheet">
+{% endblock %}
+
+{% block nav_links %}
+<li><a href="/" class="nav-link active">Dashboard</a></li>
+<li><a href="/retailers" class="nav-link">Retailers</a></li>
+<li><a href="/suppliers" class="nav-link">Suppliers</a></li>
+<li>
+  <a href="/hitl-queue" class="nav-link">
+    HITL Queue
+    <span class="badge badge-warn"
+          hx-get="/htmx/hitl-count"
+          hx-trigger="load, every 30s"
+          hx-swap="outerHTML">{{ hitl_queue_count }}</span>
+  </a>
+</li>
+<li><a href="/monica-memory" class="nav-link">Monica Memory</a></li>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1 class="page-title">Command Centre</h1>
+  <span class="page-subtitle mono">{{ now }}</span>
+</div>
+
+<!-- KPI bar -->
+<div class="kpi-row">
+  <div class="kpi-card">
+    <span class="kpi-value text-active">{{ retailers | length }}</span>
+    <span class="kpi-label">Retailers</span>
+  </div>
+  <div class="kpi-card">
+    <span class="kpi-value text-active">{{ suppliers | length }}</span>
+    <span class="kpi-label">Suppliers</span>
+  </div>
+  <div class="kpi-card {% if hitl_queue_count > 0 %}kpi-card--warn{% endif %}">
+    <span class="kpi-value {% if hitl_queue_count > 0 %}text-warn{% else %}text-active{% endif %}">
+      {{ hitl_queue_count }}
+    </span>
+    <span class="kpi-label">HITL Pending</span>
+  </div>
+  <div class="kpi-card">
+    <span class="kpi-value text-active">{{ memory_entry_count }}</span>
+    <span class="kpi-label">Monica Entries</span>
+  </div>
+</div>
+
+<!-- Certification matrix -->
+<section class="section">
+  <h2 class="section-title">Certification Matrix</h2>
+  {% if retailers and suppliers %}
+  <div class="table-scroll">
+    <table class="data-table matrix-table">
+      <thead>
+        <tr>
+          <th class="mono">Supplier</th>
+          {% for r in retailers %}
+          <th class="mono">{{ r }}</th>
+          {% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for s in suppliers %}
+        <tr
+          hx-get="/htmx/supplier-gate/{{ s }}"
+          hx-trigger="load"
+          hx-target="find td.gate-cell"
+          hx-swap="innerHTML">
+          <td class="mono supplier-name">{{ s }}</td>
+          {% for r in retailers %}
+          <td class="gate-cell" data-retailer="{{ r }}" data-supplier="{{ s }}">
+            <span class="status-dot status-dot--pending">…</span>
+          </td>
+          {% endfor %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty-state">
+    <p class="empty-text">No retailers or suppliers onboarded yet.</p>
+    <a href="/retailers" class="btn btn-primary">Add First Retailer</a>
+  </div>
+  {% endif %}
+</section>
+
+<!-- Recent HITL queue items -->
+{% if hitl_queue_count > 0 %}
+<section class="section">
+  <div class="section-header">
+    <h2 class="section-title text-warn">⚠ HITL Queue</h2>
+    <a href="/hitl-queue" class="btn btn-sm btn-warn">View All {{ hitl_queue_count }}</a>
+  </div>
+  <p class="hint-text">Human review required before pipeline can continue.</p>
+</section>
+{% endif %}
+
+<!-- Agent status -->
+<section class="section">
+  <h2 class="section-title">Agent Roster</h2>
+  <div class="agent-grid">
+    {% set agents = [
+      ("Monica", "Orchestrator", "active"),
+      ("Dwight", "Spec Analyst", "active"),
+      ("Andy", "YAML Mapper", "active"),
+      ("Moses", "Payload Analyst", "active"),
+      ("Kelly", "Communications", "active"),
+      ("Ryan", "Patch Generator", "active"),
+    ] %}
+    {% for name, role, state in agents %}
+    <div class="agent-card">
+      <span class="agent-indicator status-dot status-dot--{{ state }}"></span>
+      <span class="agent-name mono">{{ name }}</span>
+      <span class="agent-role">{{ role }}</span>
+    </div>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}

@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% block title %}certPortal — Ryan's Patches{% endblock %}
+{% block fonts %}<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">{% endblock %}
+
+{% block nav_links %}
+<li><a href="/" class="nav-link">Home</a></li>
+<li><a href="/scenarios" class="nav-link">Scenarios</a></li>
+<li><a href="/errors" class="nav-link">Errors</a></li>
+<li><a href="/patches" class="nav-link active">Patches</a></li>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1 class="page-title">Ryan's Patch Suggestions</h1>
+  <p class="page-subtitle">
+    Actionable fix instructions for your EDI errors.
+    {% if patches %}{{ patches | length }} suggestion(s) — {{ patches | selectattr('applied') | list | length }} applied.{% endif %}
+  </p>
+</div>
+
+{% if patches %}
+<!-- Filter bar -->
+<div class="filter-bar">
+  <button class="filter-btn active" onclick="filterPatches('all')">All ({{ patches | length }})</button>
+  <button class="filter-btn" onclick="filterPatches('pending')">
+    Pending ({{ patches | rejectattr('applied') | list | length }})
+  </button>
+  <button class="filter-btn" onclick="filterPatches('applied')">
+    Applied ({{ patches | selectattr('applied') | list | length }})
+  </button>
+</div>
+
+<div class="patch-list" id="patch-list">
+  {% for p in patches %}
+  <div class="patch-card {% if p.applied %}patch-card--applied{% endif %}" data-applied="{{ p.applied | lower }}">
+    <div class="patch-card-header">
+      <div class="patch-meta">
+        <span class="patch-code mono">{{ p.error_code }}</span>
+        <span class="patch-segment mono">{{ p.segment }}{% if p.element %}·{{ p.element }}{% endif %}</span>
+      </div>
+      <div class="patch-status">
+        {% if p.applied %}
+        <span class="patch-badge patch-badge--applied">✓ Applied</span>
+        {% else %}
+        <span class="patch-badge patch-badge--pending">Pending</span>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="patch-card-body">
+      <p class="patch-summary-text">{{ p.summary }}</p>
+    </div>
+
+    <div class="patch-card-footer">
+      <span class="patch-time text-muted text-sm">
+        {{ p.created_at.strftime('%Y-%m-%d %H:%M') if p.created_at else '—' }}
+      </span>
+      {% if not p.applied %}
+      <button class="btn btn-success-sm"
+              hx-post="/patches/{{ p.id }}/mark-applied"
+              hx-target="closest .patch-card"
+              hx-swap="outerHTML"
+              hx-on::after-request="filterPatches(window._activeFilter || 'all')">
+        ✓ Mark Applied
+      </button>
+      {% endif %}
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+<div class="patch-hint">
+  <p>💡 <strong>Tip:</strong> Ryan's patches suggest fixes based on your retailer's THESIS.md specification. Apply each fix in your EDI system, then re-submit your test scenarios.</p>
+</div>
+
+{% else %}
+<div class="empty-state">
+  <div class="empty-icon">🔧</div>
+  <h2 class="empty-title">No patches yet</h2>
+  <p class="empty-text">Submit EDI test files to get validation results. If any errors are found, Ryan will automatically generate fix suggestions here.</p>
+  <a href="/scenarios" class="btn btn-primary">View Scenarios →</a>
+</div>
+{% endif %}
+
+{% block extra_js %}
+<script>
+window._activeFilter = 'all';
+function filterPatches(type) {
+  window._activeFilter = type;
+  document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+  event.target.classList.add('active');
+  document.querySelectorAll('.patch-card').forEach(card => {
+    if (type === 'all') { card.style.display = ''; return; }
+    const applied = card.dataset.applied === 'true';
+    card.style.display = ((type === 'applied' && applied) || (type === 'pending' && !applied)) ? '' : 'none';
+  });
+}
+</script>
+{% endblock %}
+{% endblock %}

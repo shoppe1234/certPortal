@@ -1,0 +1,158 @@
+{% extends "base.html" %}
+{% block title %}certPortal Retailer — YAML Wizard{% endblock %}
+{% block fonts %}<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">{% endblock %}
+
+{% block nav_links %}
+<li><a href="/" class="nav-link">Home</a></li>
+<li><a href="/spec-setup" class="nav-link">Spec Setup</a></li>
+<li><a href="/yaml-wizard" class="nav-link active">YAML Wizard</a></li>
+<li><a href="/supplier-status" class="nav-link">Supplier Status</a></li>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1 class="page-title">YAML Wizard</h1>
+  <p class="page-subtitle">Three paths to EDI transaction maps. Choose the one that fits your workflow.</p>
+</div>
+
+<!-- Path selector tabs -->
+<div class="path-tabs" role="tablist">
+  <button class="path-tab active" id="tab-path1" role="tab" aria-controls="path1-panel"
+          onclick="switchPath('path1')">
+    <span class="path-num">1</span>
+    <span class="path-name">PDF Extract</span>
+    <span class="path-desc">Auto-extract from TPG</span>
+  </button>
+  <button class="path-tab" id="tab-path2" role="tab" aria-controls="path2-panel"
+          onclick="switchPath('path2')">
+    <span class="path-num">2</span>
+    <span class="path-name">Upload YAML</span>
+    <span class="path-desc">Validate existing map</span>
+  </button>
+  <button class="path-tab" id="tab-path3" role="tab" aria-controls="path3-panel"
+          onclick="switchPath('path3')">
+    <span class="path-num">3</span>
+    <span class="path-name">Step-by-Step</span>
+    <span class="path-desc">Build with wizard</span>
+  </button>
+</div>
+
+<!-- Path 1: PDF Extraction -->
+<div class="path-panel" id="path1-panel" role="tabpanel">
+  <div class="path-intro">
+    <p>Andy will extract YAML transaction maps from your Trading Partner Guide PDF using GPT-4o-mini. Deterministic, versioned output.</p>
+  </div>
+  <form id="path1-form">
+    <div class="form-group">
+      <label class="form-label">Retailer Slug</label>
+      <select name="retailer_slug" class="form-select">
+        {% for s in specs %}
+        <option value="{{ s.retailer_slug }}">{{ s.retailer_slug }} (v{{ s.spec_version }})</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">PDF S3 Key (certportal-raw-edi bucket)</label>
+      <input type="text" name="pdf_s3_key" class="form-input" placeholder="tpg/guide.pdf">
+    </div>
+    <button class="btn btn-primary"
+            hx-post="/yaml-wizard/path1"
+            hx-include="#path1-form"
+            hx-target="#path1-result">
+      Extract YAML Maps →
+    </button>
+  </form>
+  <div id="path1-result" class="path-result"></div>
+</div>
+
+<!-- Path 2: Upload YAML -->
+<div class="path-panel hidden" id="path2-panel" role="tabpanel">
+  <div class="path-intro">
+    <p>Upload a pre-built YAML map file. Andy will validate it against X12 005010 schema and store it in the retailer workspace.</p>
+  </div>
+  <form id="path2-form">
+    <div class="form-group">
+      <label class="form-label">Retailer Slug</label>
+      <select name="retailer_slug" class="form-select">
+        {% for s in specs %}
+        <option value="{{ s.retailer_slug }}">{{ s.retailer_slug }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">YAML S3 Key (certportal-raw-edi bucket)</label>
+      <input type="text" name="yaml_s3_key" class="form-input" placeholder="uploads/my-850-map.yaml">
+    </div>
+    <button class="btn btn-primary"
+            hx-post="/yaml-wizard/path2"
+            hx-include="#path2-form"
+            hx-target="#path2-result">
+      Validate & Store →
+    </button>
+  </form>
+  <div id="path2-result" class="path-result"></div>
+</div>
+
+<!-- Path 3: Step-by-step wizard -->
+<div class="path-panel hidden" id="path3-panel" role="tabpanel">
+  <div class="path-intro">
+    <p>Build YAML maps interactively. Select transactions, configure field mappings, and Andy will serialize and validate the output.</p>
+  </div>
+  <form id="path3-form">
+    <div class="form-group">
+      <label class="form-label">Retailer Slug</label>
+      <select name="retailer_slug" class="form-select">
+        {% for s in specs %}
+        <option value="{{ s.retailer_slug }}">{{ s.retailer_slug }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Transaction Bundle</label>
+      <select name="bundle" class="form-select" id="bundle-select" onchange="updateTransactions(this.value)">
+        {% for bundle_name, codes in supported_bundles.items() %}
+        <option value="{{ bundle_name }}">{{ bundle_name | replace('_', ' ') | title }} ({{ codes | join(', ') }})</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Select Transactions</label>
+      <div class="checkbox-group" id="tx-checkboxes">
+        {% for code in supported_bundles.general_merchandise %}
+        <label class="checkbox-label">
+          <input type="checkbox" name="transaction_types" value="{{ code }}" checked>
+          <span>{{ code }}</span>
+        </label>
+        {% endfor %}
+      </div>
+    </div>
+    <button class="btn btn-primary"
+            hx-post="/yaml-wizard/path3"
+            hx-include="#path3-form"
+            hx-target="#path3-result">
+      Generate YAML Maps →
+    </button>
+  </form>
+  <div id="path3-result" class="path-result"></div>
+</div>
+
+{% block extra_js %}
+<script>
+function switchPath(path) {
+  document.querySelectorAll('.path-tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.path-panel').forEach(p => p.classList.add('hidden'));
+  document.getElementById('tab-' + path).classList.add('active');
+  document.getElementById(path + '-panel').classList.remove('hidden');
+}
+
+function updateTransactions(bundle) {
+  const bundles = {{ supported_bundles | tojson }};
+  const codes = bundles[bundle] || [];
+  const container = document.getElementById('tx-checkboxes');
+  container.innerHTML = codes.map(c =>
+    `<label class="checkbox-label"><input type="checkbox" name="transaction_types" value="${c}" checked><span>${c}</span></label>`
+  ).join('');
+}
+</script>
+{% endblock %}
+{% endblock %}

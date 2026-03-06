@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}certPortal Admin — Monica Memory{% endblock %}
+{% block fonts %}<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;700&display=swap" rel="stylesheet">{% endblock %}
+
+{% block nav_links %}
+<li><a href="/" class="nav-link">Dashboard</a></li>
+<li><a href="/retailers" class="nav-link">Retailers</a></li>
+<li><a href="/suppliers" class="nav-link">Suppliers</a></li>
+<li><a href="/hitl-queue" class="nav-link">HITL Queue</a></li>
+<li><a href="/monica-memory" class="nav-link active">Monica Memory</a></li>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1 class="page-title">Monica Memory Log</h1>
+  <span class="page-subtitle mono">{{ total }} entries · Page {{ page }}/{{ total_pages }}</span>
+</div>
+
+<section class="section">
+  <div class="memory-log" aria-label="Monica memory log" role="log">
+    {% for entry in entries %}
+    <div class="memory-entry memory-entry--{{ entry.direction | lower }}">
+      <span class="memory-ts mono text-dim">{{ entry.timestamp.strftime('%Y-%m-%dT%H:%M:%SZ') if entry.timestamp else '—' }}</span>
+      <span class="memory-agent mono
+        {% if entry.agent == 'MONICA' %}text-active
+        {% elif entry.agent == 'KELLY' %}text-warn
+        {% elif entry.agent == 'RYAN' %}text-error
+        {% else %}text-muted{% endif %}
+      ">[{{ entry.agent }}]</span>
+      <span class="memory-dir mono
+        {% if entry.direction == 'Q' %}text-warn{% else %}text-active{% endif %}
+      ">[{{ entry.direction }}]</span>
+      <span class="memory-msg">{{ entry.message }}</span>
+      {% if entry.supplier_slug %}
+      <span class="memory-scope mono text-dim">{{ entry.retailer_slug }}/{{ entry.supplier_slug }}</span>
+      {% endif %}
+    </div>
+    {% else %}
+    <div class="empty-state">
+      <p class="empty-text mono">No Monica memory entries yet. Run an agent to populate.</p>
+    </div>
+    {% endfor %}
+  </div>
+
+  <!-- Pagination -->
+  {% if total_pages > 1 %}
+  <div class="pagination">
+    {% if page > 1 %}
+    <a href="?page={{ page - 1 }}&limit={{ limit }}" class="btn btn-sm">← Previous</a>
+    {% endif %}
+    <span class="mono text-dim">{{ page }} / {{ total_pages }}</span>
+    {% if page < total_pages %}
+    <a href="?page={{ page + 1 }}&limit={{ limit }}" class="btn btn-sm">Next →</a>
+    {% endif %}
+  </div>
+  {% endif %}
+</section>
+{% endblock %}

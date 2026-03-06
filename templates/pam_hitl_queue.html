@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}certPortal Admin — HITL Queue{% endblock %}
+{% block fonts %}<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;700&display=swap" rel="stylesheet">{% endblock %}
+
+{% block nav_links %}
+<li><a href="/" class="nav-link">Dashboard</a></li>
+<li><a href="/retailers" class="nav-link">Retailers</a></li>
+<li><a href="/suppliers" class="nav-link">Suppliers</a></li>
+<li><a href="/hitl-queue" class="nav-link active">HITL Queue <span class="badge badge-warn">{{ queue_items | length }}</span></a></li>
+<li><a href="/monica-memory" class="nav-link">Monica Memory</a></li>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1 class="page-title">HITL Queue <span class="text-warn">⚠</span></h1>
+  <span class="page-subtitle">Items requiring human review before pipeline continues</span>
+</div>
+
+{% if queue_items %}
+<div id="hitl-list">
+  {% for item in queue_items %}
+  <div class="hitl-card" id="hitl-{{ item.queue_id }}">
+    <div class="hitl-card-header">
+      <div class="hitl-meta">
+        <span class="hitl-agent mono text-warn">{{ item.agent | upper }}</span>
+        <span class="hitl-sep">→</span>
+        <span class="hitl-supplier mono text-active">{{ item.supplier_slug }}</span>
+        <span class="hitl-channel mono text-dim">via {{ item.channel or 'system' }}</span>
+      </div>
+      <span class="hitl-time mono text-dim">
+        {{ item.queued_at.strftime('%Y-%m-%d %H:%M:%S') if item.queued_at else '—' }}
+      </span>
+    </div>
+
+    <div class="hitl-summary">
+      <p class="hitl-summary-text">{{ item.summary or '(No summary available)' }}</p>
+    </div>
+
+    <div class="hitl-actions">
+      <button class="btn btn-active"
+              hx-post="/hitl-queue/{{ item.queue_id }}/approve"
+              hx-target="#hitl-{{ item.queue_id }}"
+              hx-swap="outerHTML"
+              hx-confirm="Approve this Kelly draft for {{ item.supplier_slug }}?">
+        ✓ Approve
+      </button>
+      <button class="btn btn-error"
+              hx-post="/hitl-queue/{{ item.queue_id }}/reject"
+              hx-target="#hitl-{{ item.queue_id }}"
+              hx-swap="outerHTML"
+              hx-confirm="Reject this draft for {{ item.supplier_slug }}?">
+        ✕ Reject
+      </button>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="empty-state">
+  <div class="empty-icon">✓</div>
+  <p class="empty-text mono">HITL queue is clear. All agents running without ambiguity.</p>
+</div>
+{% endif %}
+{% endblock %}

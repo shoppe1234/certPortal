@@ -1,0 +1,140 @@
+{% extends "base.html" %}
+{% block title %}certPortal — Supplier Home{% endblock %}
+{% block fonts %}
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+{% endblock %}
+
+{% block nav_links %}
+<li><a href="/" class="nav-link active">Home</a></li>
+<li><a href="/scenarios" class="nav-link">Scenarios</a></li>
+<li><a href="/errors" class="nav-link">Errors</a></li>
+<li><a href="/patches" class="nav-link">Patches</a></li>
+{% endblock %}
+
+{% block content %}
+<!-- Welcome header -->
+<div class="chrissy-welcome">
+  <div class="welcome-text">
+    <h1 class="page-title">
+      {% if certified %}
+        🎉 You're Certified!
+      {% else %}
+        Welcome, {{ supplier.supplier_slug | replace('-', ' ') | title }}
+      {% endif %}
+    </h1>
+    <p class="page-subtitle">
+      {% if certified %}
+        Your EDI certification is complete. Keep this badge for your records.
+      {% else %}
+        Follow the steps below to complete your EDI certification.
+      {% endif %}
+    </p>
+  </div>
+  {% if certified %}
+  <div class="cert-badge">
+    <div class="cert-badge-inner">
+      <span class="cert-check">✓</span>
+      <span class="cert-label">EDI Certified</span>
+      <span class="cert-date">{{ supplier.last_updated.strftime('%Y-%m-%d') if supplier.last_updated else 'Today' }}</span>
+    </div>
+  </div>
+  {% endif %}
+</div>
+
+<!-- Progress bar -->
+{% if not certified %}
+<div class="progress-section">
+  <div class="progress-header">
+    <span class="progress-label">Certification Progress</span>
+    <span class="progress-pct">{{ progress_pct }}%</span>
+  </div>
+  <div class="progress-track">
+    <div class="progress-fill" style="width: {{ progress_pct }}%"></div>
+  </div>
+  <div class="progress-steps">
+    <span class="pstep {% if supplier.gate_1 == 'COMPLETE' or supplier.gate_1 == 'CERTIFIED' %}pstep--done{% endif %}">
+      ① Spec Review
+    </span>
+    <span class="pstep-connector"></span>
+    <span class="pstep {% if supplier.gate_2 == 'COMPLETE' or supplier.gate_2 == 'CERTIFIED' %}pstep--done{% endif %}">
+      ② EDI Validation
+    </span>
+    <span class="pstep-connector"></span>
+    <span class="pstep {% if supplier.gate_3 == 'CERTIFIED' %}pstep--done{% endif %}">
+      ③ Certification
+    </span>
+  </div>
+</div>
+{% endif %}
+
+<!-- Gate status cards -->
+<div class="gate-cards">
+  <div class="gate-card gate-card--{{ supplier.gate_1 | lower }}">
+    <div class="gate-card-header">
+      <span class="gate-num">Gate 1</span>
+      <span class="gate-status-badge badge-{{ supplier.gate_1 | lower }}">{{ supplier.gate_1 }}</span>
+    </div>
+    <h3 class="gate-card-title">Spec Review</h3>
+    <p class="gate-card-desc">Your retailer reviews the EDI specification requirements.</p>
+    {% if supplier.gate_1 == 'COMPLETE' %}
+    <p class="gate-card-success">✓ Retailer has confirmed your spec is correct.</p>
+    {% else %}
+    <p class="gate-card-pending">Awaiting retailer review.</p>
+    {% endif %}
+  </div>
+
+  <div class="gate-card gate-card--{{ supplier.gate_2 | lower }}">
+    <div class="gate-card-header">
+      <span class="gate-num">Gate 2</span>
+      <span class="gate-status-badge badge-{{ supplier.gate_2 | lower }}">{{ supplier.gate_2 }}</span>
+    </div>
+    <h3 class="gate-card-title">EDI Validation</h3>
+    <p class="gate-card-desc">Your EDI test scenarios are validated against the retailer's requirements.</p>
+    {% if supplier.gate_2 == 'COMPLETE' %}
+    <p class="gate-card-success">✓ All required test scenarios passed.</p>
+    {% elif supplier.gate_1 == 'COMPLETE' %}
+    <a href="/scenarios" class="btn btn-primary-sm">View Scenarios →</a>
+    {% else %}
+    <p class="gate-card-pending">Complete Gate 1 first.</p>
+    {% endif %}
+  </div>
+
+  <div class="gate-card gate-card--{{ supplier.gate_3 | lower }}">
+    <div class="gate-card-header">
+      <span class="gate-num">Gate 3</span>
+      <span class="gate-status-badge badge-{{ supplier.gate_3 | lower }}">{{ supplier.gate_3 }}</span>
+    </div>
+    <h3 class="gate-card-title">Certification</h3>
+    <p class="gate-card-desc">Your EDI certification is issued by the certPortal admin team.</p>
+    {% if supplier.gate_3 == 'CERTIFIED' %}
+    <p class="gate-card-success">🏆 Certified! You can trade EDI with this retailer.</p>
+    {% elif supplier.gate_2 == 'COMPLETE' %}
+    <p class="gate-card-pending">Admin team is reviewing for certification.</p>
+    {% else %}
+    <p class="gate-card-pending">Complete Gates 1 and 2 first.</p>
+    {% endif %}
+  </div>
+</div>
+
+<!-- Quick links -->
+<div class="quick-links">
+  <h2 class="section-title">Quick Actions</h2>
+  <div class="quick-link-grid">
+    <a href="/scenarios" class="quick-link-card">
+      <span class="quick-link-icon">📋</span>
+      <span class="quick-link-label">View Test Scenarios</span>
+      <span class="quick-link-count">{{ total_tests }} total</span>
+    </a>
+    <a href="/errors" class="quick-link-card">
+      <span class="quick-link-icon">⚠</span>
+      <span class="quick-link-label">View Errors</span>
+      <span class="quick-link-count">{{ total_tests - passed_tests }} issues</span>
+    </a>
+    <a href="/patches" class="quick-link-card">
+      <span class="quick-link-icon">🔧</span>
+      <span class="quick-link-label">Ryan's Patch Suggestions</span>
+    </a>
+  </div>
+</div>
+{% endblock %}

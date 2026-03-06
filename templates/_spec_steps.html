@@ -1,0 +1,15 @@
+{% if spec %}
+<div class="spec-steps-result">
+  <div class="step-done">
+    <span class="step-done-icon">✓</span>
+    <div>
+      <strong>{{ spec.retailer_slug }}</strong> spec loaded (v{{ spec.spec_version }})
+      <span class="text-muted text-sm">· THESIS.md at {{ spec.thesis_s3_key | truncate(30) }}</span>
+    </div>
+  </div>
+</div>
+{% else %}
+<div class="step-pending">
+  <p class="text-muted">No spec found for <strong>{{ retailer_slug }}</strong>. Run Dwight first.</p>
+</div>
+{% endif %}

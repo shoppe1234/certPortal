@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block title %}certPortal Admin — Suppliers{% endblock %}
+{% block fonts %}<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;700&display=swap" rel="stylesheet">{% endblock %}
+
+{% block nav_links %}
+<li><a href="/" class="nav-link">Dashboard</a></li>
+<li><a href="/retailers" class="nav-link">Retailers</a></li>
+<li><a href="/suppliers" class="nav-link active">Suppliers</a></li>
+<li><a href="/hitl-queue" class="nav-link">HITL Queue</a></li>
+<li><a href="/monica-memory" class="nav-link">Monica Memory</a></li>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1 class="page-title">Suppliers</h1>
+  <span class="page-subtitle">{{ suppliers | length }} supplier(s) in pipeline</span>
+</div>
+
+<section class="section">
+  {% if suppliers %}
+  <div class="table-scroll">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Supplier</th>
+          <th>Gate 1</th>
+          <th>Gate 2</th>
+          <th>Gate 3</th>
+          <th>Last Updated</th>
+          <th>Updated By</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for s in suppliers %}
+        <tr class="slide-in" id="supplier-row-{{ s.supplier_slug }}">
+          <td class="mono text-active">{{ s.supplier_slug }}</td>
+          <td><span class="gate-badge gate-{{ s.gate_1 | lower }}">{{ s.gate_1 }}</span></td>
+          <td><span class="gate-badge gate-{{ s.gate_2 | lower }}">{{ s.gate_2 }}</span></td>
+          <td><span class="gate-badge gate-{{ s.gate_3 | lower }}">{{ s.gate_3 }}</span></td>
+          <td class="mono text-dim">{{ s.last_updated.strftime('%Y-%m-%d %H:%M') if s.last_updated else '—' }}</td>
+          <td class="mono text-dim">{{ s.last_updated_by }}</td>
+          <td>
+            {% if s.gate_1 == 'PENDING' %}
+            <button class="btn btn-xs btn-active"
+                    hx-post="/suppliers/{{ s.supplier_slug }}/gate/1/complete"
+                    hx-target="#supplier-row-{{ s.supplier_slug }}"
+                    hx-swap="outerHTML"
+                    hx-confirm="Mark Gate 1 COMPLETE for {{ s.supplier_slug }}?">
+              → G1
+            </button>
+            {% elif s.gate_2 == 'PENDING' %}
+            <button class="btn btn-xs btn-active"
+                    hx-post="/suppliers/{{ s.supplier_slug }}/gate/2/complete"
+                    hx-confirm="Mark Gate 2 COMPLETE for {{ s.supplier_slug }}?">
+              → G2
+            </button>
+            {% elif s.gate_3 == 'PENDING' %}
+            <button class="btn btn-xs btn-warn"
+                    hx-post="/suppliers/{{ s.supplier_slug }}/gate/3/complete"
+                    hx-confirm="Mark Gate 3 COMPLETE for {{ s.supplier_slug }}?">
+              → G3
+            </button>
+            {% elif s.gate_3 == 'COMPLETE' %}
+            <button class="btn btn-xs btn-certified"
+                    hx-post="/suppliers/{{ s.supplier_slug }}/gate/3/certify"
+                    hx-confirm="Issue certification for {{ s.supplier_slug }}?">
+              Certify
+            </button>
+            {% else %}
+            <span class="text-active mono">✓ CERTIFIED</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty-state">
+    <p class="empty-text mono">No suppliers in pipeline yet.</p>
+  </div>
+  {% endif %}
+</section>
+{% endblock %}

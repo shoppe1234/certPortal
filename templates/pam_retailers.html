@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}certPortal Admin — Retailers{% endblock %}
+{% block fonts %}<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;700&display=swap" rel="stylesheet">{% endblock %}
+
+{% block nav_links %}
+<li><a href="/" class="nav-link">Dashboard</a></li>
+<li><a href="/retailers" class="nav-link active">Retailers</a></li>
+<li><a href="/suppliers" class="nav-link">Suppliers</a></li>
+<li><a href="/hitl-queue" class="nav-link">HITL Queue</a></li>
+<li><a href="/monica-memory" class="nav-link">Monica Memory</a></li>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1 class="page-title">Retailers</h1>
+  <span class="page-subtitle">{{ retailers | length }} registered retailer(s)</span>
+</div>
+
+<section class="section">
+  {% if retailers %}
+  <div class="table-scroll">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Retailer Slug</th>
+          <th>Spec Version</th>
+          <th>THESIS.md Key</th>
+          <th>Created</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in retailers %}
+        <tr class="slide-in">
+          <td class="mono text-active">{{ r.retailer_slug }}</td>
+          <td class="mono">{{ r.spec_version }}</td>
+          <td class="mono text-dim" title="{{ r.thesis_s3_key }}">
+            {{ r.thesis_s3_key | truncate(40) }}
+          </td>
+          <td class="mono text-dim">{{ r.created_at.strftime('%Y-%m-%d %H:%M') if r.created_at else '—' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty-state">
+    <p class="empty-text mono">No retailers onboarded. Run Dwight to process a Trading Partner Guide.</p>
+  </div>
+  {% endif %}
+</section>
+{% endblock %}

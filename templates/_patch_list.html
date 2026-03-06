@@ -1,0 +1,19 @@
+{% for p in patches %}
+<div class="patch-item {% if p.applied %}patch-item--applied{% endif %}">
+  <span class="patch-code mono">{{ p.error_code }}</span>
+  <span class="patch-seg mono">{{ p.segment }}</span>
+  <span class="patch-summary-short">{{ p.summary | truncate(80) }}</span>
+  {% if p.applied %}
+  <span class="patch-done">✓</span>
+  {% else %}
+  <button class="btn btn-xs btn-success"
+          hx-post="/patches/{{ p.id }}/mark-applied"
+          hx-target="closest .patch-item"
+          hx-swap="outerHTML">
+    Apply
+  </button>
+  {% endif %}
+</div>
+{% else %}
+<p class="text-muted">No patches yet.</p>
+{% endfor %}

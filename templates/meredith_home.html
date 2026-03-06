@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}certPortal Retailer — Home{% endblock %}
+{% block fonts %}
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+{% endblock %}
+
+{% block nav_links %}
+<li><a href="/" class="nav-link active">Home</a></li>
+<li><a href="/spec-setup" class="nav-link">Spec Setup</a></li>
+<li><a href="/yaml-wizard" class="nav-link">YAML Wizard</a></li>
+<li><a href="/supplier-status" class="nav-link">Supplier Status</a></li>
+{% endblock %}
+
+{% block content %}
+<div class="page-header meredith-header">
+  <div>
+    <h1 class="page-title">
+      {% if spec %}{{ spec.retailer_slug | replace('-', ' ') | title }} EDI Portal{% else %}Retailer EDI Portal{% endif %}
+    </h1>
+    <p class="page-subtitle">Manage EDI certifications for your supplier network.</p>
+  </div>
+  {% if spec %}
+  <div class="spec-badge">
+    <span class="spec-version">X12 {{ spec.spec_version }}</span>
+  </div>
+  {% endif %}
+</div>
+
+<!-- Stats row -->
+<div class="stats-row">
+  <div class="stat-card">
+    <span class="stat-value">{{ supplier_count }}</span>
+    <span class="stat-label">Suppliers in Pipeline</span>
+  </div>
+  <div class="stat-card stat-card--success">
+    <span class="stat-value text-success">{{ certified_count }}</span>
+    <span class="stat-label">Certified</span>
+  </div>
+  <div class="stat-card">
+    <span class="stat-value">{{ supplier_count - certified_count }}</span>
+    <span class="stat-label">In Progress</span>
+  </div>
+</div>
+
+<!-- Getting started / quick actions -->
+<div class="card-grid">
+  <div class="action-card">
+    <div class="action-icon">📋</div>
+    <h3 class="action-title">Spec Setup</h3>
+    <p class="action-desc">Upload your Trading Partner Guide and generate a THESIS.md specification document via Dwight.</p>
+    <a href="/spec-setup" class="btn btn-primary">Go to Spec Setup →</a>
+  </div>
+  <div class="action-card">
+    <div class="action-icon">🗂</div>
+    <h3 class="action-title">YAML Wizard</h3>
+    <p class="action-desc">Map EDI transaction requirements using PDF extraction, direct upload, or the step-by-step wizard.</p>
+    <a href="/yaml-wizard" class="btn btn-primary">Open YAML Wizard →</a>
+  </div>
+  <div class="action-card">
+    <div class="action-icon">📊</div>
+    <h3 class="action-title">Supplier Status</h3>
+    <p class="action-desc">Track certification progress across all your suppliers. View gate status and test results.</p>
+    <a href="/supplier-status" class="btn btn-primary">View Status Board →</a>
+  </div>
+</div>
+
+{% if not spec %}
+<div class="onboarding-banner">
+  <div class="onboarding-icon">👋</div>
+  <div class="onboarding-text">
+    <strong>Welcome to certPortal!</strong>
+    <p>Start by setting up your EDI specification — upload your Trading Partner Guide in <a href="/spec-setup">Spec Setup</a>.</p>
+  </div>
+</div>
+{% endif %}
+{% endblock %}
