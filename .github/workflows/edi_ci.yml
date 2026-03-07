@@ -64,11 +64,17 @@ jobs:
             -v
 
   # ──────────────────────────────────────────────────────────────────────────
-  # Job 3: Integration tests (SuiteF) — requires live Postgres
-  # Spins up a Postgres service container for the job.
+  # Job 3: Integration tests (Suites A–F) — requires live Postgres
+  #
+  # Suites A–E: auth, agents, gates, workspace, HITL (no live S3/OpenAI).
+  #   OVH/OpenAI env vars are set to safe fake values because every suite
+  #   that touches S3 or LLM calls mocks those interactions internally.
+  #
+  # Suite F: full lifecycle engine E2E against the Postgres service container.
+  #   Runs migrations 001 (lifecycle tables) + 002 (portal_users) first.
   # ──────────────────────────────────────────────────────────────────────────
   integration-tests:
-    name: "Integration Tests (SuiteF — live Postgres)"
+    name: "Integration Tests (Suites A–F — live Postgres)"
     runs-on: ubuntu-latest
 
     services:
@@ -87,8 +93,21 @@ jobs:
           --health-retries 10
 
     env:
+      # Live DB for Suite F + Suite A auth DB path
       CERTPORTAL_DB_URL: postgresql://certportal:certportal@localhost:5432/certportal
       LIFECYCLE_PROFILE: development
+
+      # JWT secret — any non-empty string works in CI (HS256 self-signed)
+      CERTPORTAL_JWT_SECRET: ci-test-jwt-secret-not-for-production
+
+      # OVH S3 — fake values; Suites B-E mock all S3 calls internally
+      OVH_S3_ENDPOINT: https://fake.s3.ci
+      OVH_S3_KEY: fake-key-ci
+      OVH_S3_SECRET: fake-secret-ci
+      OVH_S3_REGION: fake-region-ci
+
+      # OpenAI — fake key; no suite makes live LLM calls
+      OPENAI_API_KEY: sk-fake-openai-key-ci
 
     steps:
       - uses: actions/checkout@v4
@@ -105,7 +124,7 @@ jobs:
       - name: Install pyedi_core (editable)
         run: pip install -e pyedi_core/
 
-      - name: Run Postgres migration
+      - name: Run migration 001 — lifecycle tables
         run: |
           python -c "
           import os, psycopg2
@@ -115,18 +134,43 @@ jobs:
           with open('lifecycle_engine/migrations/001_lifecycle_tables.sql') as f:
               conn.cursor().execute(f.read())
           conn.commit()
-          print('Migration applied')
+          print('Migration 001 applied')
           "
 
-      - name: Run SuiteF integration tests
+      - name: Run migration 002 — portal_users table
+        run: |
+          python -c "
+          import os, psycopg2
+          dsn = os.environ['CERTPORTAL_DB_URL']
+          conn = psycopg2.connect(dsn)
+          conn.autocommit = False
+          with open('migrations/002_users_table.sql') as f:
+              conn.cursor().execute(f.read())
+          conn.commit()
+          print('Migration 002 applied')
+          "
+
+      - name: Run all integration suites (A–F)
         run: |
           python -c "
           import os, sys
           os.environ.setdefault('LIFECYCLE_PROFILE', 'development')
-          from testing.suites.suite_f import run
-          results = run()
-          failed = sum(1 for r in results if r['status'].value == 'FAIL')
-          passed = sum(1 for r in results if r['status'].value == 'PASS')
-          print(f'SuiteF: {passed}/10 passed, {failed} failed')
-          sys.exit(1 if failed else 0)
+
+          suites = ['a', 'b', 'c', 'd', 'e', 'f']
+          total_pass = total_fail = total_skip = 0
+
+          for letter in suites:
+              mod = __import__(f'testing.suites.suite_{letter}', fromlist=['run'])
+              results = mod.run()
+              p = sum(1 for r in results if r['status'].value == 'PASS')
+              f = sum(1 for r in results if r['status'].value == 'FAIL')
+              s = sum(1 for r in results if r['status'].value == 'SKIP')
+              total_pass += p
+              total_fail += f
+              total_skip += s
+              print(f'Suite {letter.upper()}: {p} PASS  {f} FAIL  {s} SKIP')
+
+          print(f'')
+          print(f'TOTAL: {total_pass} PASS  {total_fail} FAIL  {total_skip} SKIP')
+          sys.exit(1 if total_fail > 0 else 0)
           "
