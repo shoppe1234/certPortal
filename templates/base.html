@@ -30,6 +30,16 @@
       <span class="nav-time" id="nav-clock"
             hx-get="/health" hx-trigger="every 60s" hx-swap="none">
       </span>
+      {% if current_user is defined and current_user %}
+      <div class="nav-user">
+        <span class="nav-user-avatar" aria-hidden="true">{{ current_user.sub[0] | upper }}</span>
+        <span class="nav-user-name">{{ current_user.sub }}</span>
+        <span class="nav-role-badge nav-role-badge--{{ current_user.role }}">{{ current_user.role }}</span>
+        <form method="post" action="/logout" class="nav-logout-form">
+          <button type="submit" class="btn-logout" title="Sign out">↩ sign out</button>
+        </form>
+      </div>
+      {% endif %}
     </div>
   </nav>
 
