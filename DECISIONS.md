@@ -115,6 +115,48 @@ resources, explicitly permitted by the data model.
 
 ---
 
+## ADR-011: `prior_state` nullable in `lifecycle_events`
+
+**Context:** The first document in a PO lifecycle (850 Purchase Order) has no predecessor
+state — `prior_state` is conceptually NULL at that point.
+**Decision:** Changed `prior_state TEXT NOT NULL` to `prior_state TEXT` (nullable) in
+`001_lifecycle_tables.sql`. The engine passes `None` for the first event; Postgres stores NULL.
+**Impact:** Test_02 in SuiteF verifies `events[0]['prior_state'] is None` explicitly.
+**Sprint 2:** No change needed — NULL semantics are correct and self-documenting.
+
+---
+
+## ADR-012: Moses lifecycle hook via `_extract_po_from_edi()` regex
+
+**Context:** Moses calls `pyedi_core.validate()` (segment validation), not `Pipeline.run()`.
+The lifecycle hook in `pipeline.py` therefore does not fire for Moses-processed files.
+**Decision:** Added direct `on_document_processed()` call in `agents/moses.py` (Step 13b).
+Since Moses has only raw EDI content (no parsed payload), a helper `_extract_po_from_edi()`
+uses X12 segment regexes to extract the PO number: BEG03 (850), BCH03 (860), BAK03 (855),
+BCA03 (865), PRF01 (856), BIG04 (810). If the segment is absent the engine logs a non-fatal
+`missing_po` violation (`strict_mode=False` in dev).
+**Alternative considered:** Running `Pipeline.run()` inside Moses for the sole purpose of
+getting a parsed payload. Rejected — circular coupling, doubles parse time, risk of manifest
+side-effects.
+**Sprint 2:** When Moses is upgraded to call `Pipeline.run()` directly, remove the regex
+fallback and use the parsed payload dict from `pipeline.run(return_payload=True)`.
+
+---
+
+## ADR-013: Lifecycle hook fires only on non-dry-run writes
+
+**Context:** `pipeline.py` has a `dry_run` mode that skips file writes. The lifecycle hook
+was placed inside the `if not do_dry_run:` block after `driver.write()`.
+**Decision:** Lifecycle events are only recorded for real document writes, not dry-run
+executions. This prevents test/simulation runs from polluting the `po_lifecycle` audit trail
+and avoids duplicate events when the same file is tested before production processing.
+**Impact:** `Pipeline.run(dry_run=True)` will never advance lifecycle state. Document this
+in operator runbooks.
+**Sprint 2:** Consider adding a `lifecycle_dry_run` flag to `lifecycle_engine/config.yaml`
+if staging environments need state-machine simulation without Postgres writes.
+
+---
+
 ## Out-of-scope items (not built per Section 10)
 
 - React frontend

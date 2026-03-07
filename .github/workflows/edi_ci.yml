@@ -1,0 +1,132 @@
+name: EDI CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # ──────────────────────────────────────────────────────────────────────────
+  # Job 1: Schema validation gate (no DB needed — pure YAML)
+  # Runs validate_all.py --ci; fails the build on any schema error.
+  # ──────────────────────────────────────────────────────────────────────────
+  schema-validation:
+    name: "Schema Validation (validate_all --ci)"
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run validate_all --ci
+        run: python schema_validators/validate_all.py --framework-path ./edi_framework --ci
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Job 2: Unit tests + coverage (no DB — mocked psycopg2)
+  # Enforces ≥85% coverage on lifecycle_engine/ per TRD §12.
+  # ──────────────────────────────────────────────────────────────────────────
+  unit-tests:
+    name: "Unit Tests + Coverage (lifecycle_engine ≥85%)"
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Install pyedi_core (editable)
+        run: pip install -e pyedi_core/
+
+      - name: Run unit tests with coverage
+        run: |
+          python -m pytest \
+            lifecycle_engine/tests/ \
+            schema_validators/tests/ \
+            --cov=lifecycle_engine \
+            --cov-report=term-missing \
+            --cov-fail-under=85 \
+            -v
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Job 3: Integration tests (SuiteF) — requires live Postgres
+  # Spins up a Postgres service container for the job.
+  # ──────────────────────────────────────────────────────────────────────────
+  integration-tests:
+    name: "Integration Tests (SuiteF — live Postgres)"
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: certportal
+          POSTGRES_PASSWORD: certportal
+          POSTGRES_DB: certportal
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      CERTPORTAL_DB_URL: postgresql://certportal:certportal@localhost:5432/certportal
+      LIFECYCLE_PROFILE: development
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Install pyedi_core (editable)
+        run: pip install -e pyedi_core/
+
+      - name: Run Postgres migration
+        run: |
+          python -c "
+          import os, psycopg2
+          dsn = os.environ['CERTPORTAL_DB_URL']
+          conn = psycopg2.connect(dsn)
+          conn.autocommit = False
+          with open('lifecycle_engine/migrations/001_lifecycle_tables.sql') as f:
+              conn.cursor().execute(f.read())
+          conn.commit()
+          print('Migration applied')
+          "
+
+      - name: Run SuiteF integration tests
+        run: |
+          python -c "
+          import os, sys
+          os.environ.setdefault('LIFECYCLE_PROFILE', 'development')
+          from testing.suites.suite_f import run
+          results = run()
+          failed = sum(1 for r in results if r['status'].value == 'FAIL')
+          passed = sum(1 for r in results if r['status'].value == 'PASS')
+          print(f'SuiteF: {passed}/10 passed, {failed} failed')
+          sys.exit(1 if failed else 0)
+          "
