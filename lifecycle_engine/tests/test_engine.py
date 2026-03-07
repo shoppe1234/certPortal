@@ -7,14 +7,19 @@ routing, violation detection, strict_mode behaviour) is tested end-to-end.
 """
 from __future__ import annotations
 
+import os
 from unittest.mock import MagicMock, patch
 
 import pytest
+import yaml
 
 from lifecycle_engine.engine import LifecycleEngine, LifecycleResult, TRANSACTION_STATE_MAP
 from lifecycle_engine.exceptions import (
+    LifecycleConfigError,
+    LifecycleError,
     LifecycleViolationError,
     InvalidTransitionError,
+    POContinuityError,
     QuantityChainError,
 )
 from lifecycle_engine.loader import LifecycleLoader
@@ -290,3 +295,297 @@ class TestLoaderIntegration:
     def test_reverse_po_cancelled_is_terminal(self):
         loader = _make_loader()
         assert loader.is_terminal_state("reverse_po_cancelled") is True
+
+
+# ---------------------------------------------------------------------------
+# from_config() factory  (lines 116-143)
+# ---------------------------------------------------------------------------
+
+class TestFromConfig:
+    def _write_config(self, tmp_path, extra_profiles=None) -> str:
+        cfg = {
+            "lifecycle_engine": {
+                "framework_base_path": "../edi_framework",
+                "profiles": {
+                    "development": {"strict_mode": False},
+                    "production": {"strict_mode": True},
+                },
+            }
+        }
+        if extra_profiles:
+            cfg["lifecycle_engine"]["profiles"].update(extra_profiles)
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text(yaml.dump(cfg), encoding="utf-8")
+        return str(config_file)
+
+    def test_from_config_happy_path(self, tmp_path):
+        """from_config() returns a LifecycleEngine with the right strict_mode."""
+        config_path = self._write_config(tmp_path)
+        mock_loader = MagicMock(spec=LifecycleLoader)
+        env = {"CERTPORTAL_DB_URL": "postgresql://test/db"}
+        with patch.dict(os.environ, env):
+            with patch("lifecycle_engine.engine.LifecycleLoader", return_value=mock_loader):
+                engine = LifecycleEngine.from_config(
+                    config_path=config_path, profile="development"
+                )
+        assert isinstance(engine, LifecycleEngine)
+        assert engine._strict_mode is False
+        assert engine._dsn == "postgresql://test/db"
+        mock_loader.load.assert_called_once()
+
+    def test_from_config_production_profile_sets_strict_mode(self, tmp_path):
+        """from_config() with profile='production' enables strict_mode."""
+        config_path = self._write_config(tmp_path)
+        mock_loader = MagicMock(spec=LifecycleLoader)
+        with patch.dict(os.environ, {"CERTPORTAL_DB_URL": "postgresql://test/db"}):
+            with patch("lifecycle_engine.engine.LifecycleLoader", return_value=mock_loader):
+                engine = LifecycleEngine.from_config(
+                    config_path=config_path, profile="production"
+                )
+        assert engine._strict_mode is True
+
+    def test_from_config_missing_dsn_raises(self, tmp_path):
+        """from_config() raises LifecycleConfigError when CERTPORTAL_DB_URL is unset."""
+        config_path = self._write_config(tmp_path)
+        env = {k: v for k, v in os.environ.items() if k != "CERTPORTAL_DB_URL"}
+        with patch.dict(os.environ, env, clear=True):
+            with pytest.raises(LifecycleConfigError, match="CERTPORTAL_DB_URL"):
+                LifecycleEngine.from_config(config_path=config_path)
+
+    def test_from_config_lifecycle_profile_env_override(self, tmp_path):
+        """LIFECYCLE_PROFILE env var overrides the profile argument."""
+        config_path = self._write_config(tmp_path)
+        mock_loader = MagicMock(spec=LifecycleLoader)
+        env = {
+            "CERTPORTAL_DB_URL": "postgresql://test/db",
+            "LIFECYCLE_PROFILE": "production",   # override development → production
+        }
+        with patch.dict(os.environ, env):
+            with patch("lifecycle_engine.engine.LifecycleLoader", return_value=mock_loader):
+                engine = LifecycleEngine.from_config(
+                    config_path=config_path, profile="development"
+                )
+        # LIFECYCLE_PROFILE=production overrides profile="development"
+        assert engine._strict_mode is True
+
+
+# ---------------------------------------------------------------------------
+# Unknown transaction/direction + 865 unknown ack_type  (lines 212-218, 248-252)
+# ---------------------------------------------------------------------------
+
+class TestUnknownTransactions:
+    def test_unknown_transaction_direction_skips_lifecycle(self):
+        """Unknown (tx_set, direction) combo returns success=True without DB write."""
+        engine = _make_engine()
+        store = _mock_store(existing_po=None)
+        with patch("lifecycle_engine.engine.StateStore", return_value=store):
+            result = engine.process_event(
+                transaction_set="999",
+                direction="unknown_direction",
+                payload=_payload("P099"),
+                source_file="unknown.edi",
+                correlation_id="corr-unknown",
+                partner_id="lowes",
+            )
+        assert result.success is True
+        assert result.violations == []
+        store.transition_and_record.assert_not_called()
+
+    def test_865_unknown_ack_type_skips_lifecycle(self):
+        """865 with ack_type other than AT/RJ returns success=True without DB write."""
+        existing = {"po_number": "P098", "current_state": "po_changed",
+                    "is_terminal": False, "ordered_qty": 50}
+        engine = _make_engine()
+        store = _mock_store(existing_po=existing)
+        payload = {"header": {"po_number": "P098", "ack_type": "XX"}}
+        with patch("lifecycle_engine.engine.StateStore", return_value=store):
+            result = engine.process_event(
+                transaction_set="865",
+                direction="outbound",
+                payload=payload,
+                source_file="865_bad.edi",
+                correlation_id="corr-865-bad",
+                partner_id="lowes",
+            )
+        assert result.success is True
+        assert result.violations == []
+        store.transition_and_record.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Additional violation paths  (lines 355-356, 378-379, 424-425)
+# ---------------------------------------------------------------------------
+
+class TestAdditionalViolations:
+    def test_n1_qualifier_violation_returns_failure(self):
+        """N1 qualifier mismatch triggers violation and returns success=False."""
+        engine = _make_engine()
+        store = _mock_store(existing_po=None)
+        # Force n1_map to require "93" for 850 — payload sends "WRONG"
+        with patch.object(
+            engine._loader, "get_n1_qualifier_map", return_value={"850": "93"}
+        ):
+            payload = {"header": {"po_number": "P050", "n1_qualifier": "WRONG"}}
+            with patch("lifecycle_engine.engine.StateStore", return_value=store):
+                result = engine.process_event(
+                    transaction_set="850",
+                    direction="inbound",
+                    payload=payload,
+                    source_file="n1.edi",
+                    correlation_id="corr-n1",
+                    partner_id="lowes",
+                )
+        assert result.success is False
+        assert "n1_qualifier" in str(store.record_violation.call_args)
+
+    def test_po_continuity_violation_returns_failure(self):
+        """PO continuity mismatch triggers violation and returns success=False."""
+        existing = {"po_number": "P055", "current_state": "po_originated",
+                    "is_terminal": False, "ordered_qty": 100}
+        engine = _make_engine()
+        store = _mock_store(existing_po=existing)
+        with patch(
+            "lifecycle_engine.engine.validate_po_number_continuity",
+            side_effect=POContinuityError("PO# mismatch on 855"),
+        ):
+            with patch("lifecycle_engine.engine.StateStore", return_value=store):
+                result = engine.process_event(
+                    transaction_set="855",
+                    direction="outbound",
+                    payload=_payload("P055"),
+                    source_file="cont.edi",
+                    correlation_id="corr-cont",
+                    partner_id="lowes",
+                )
+        assert result.success is False
+        assert "po_continuity" in str(store.record_violation.call_args)
+
+    def test_transition_and_record_lifecycle_error_reraises(self):
+        """LifecycleError from store.transition_and_record propagates out of process_event."""
+        engine = _make_engine()
+        store = _mock_store(existing_po=None)
+        store.transition_and_record.side_effect = LifecycleError("state store failed")
+        with patch("lifecycle_engine.engine.StateStore", return_value=store):
+            with pytest.raises(LifecycleError, match="state store failed"):
+                engine.process_event(
+                    transaction_set="850",
+                    direction="inbound",
+                    payload=_payload("P060"),
+                    source_file="test.edi",
+                    correlation_id="corr-060",
+                    partner_id="lowes",
+                )
+
+
+# ---------------------------------------------------------------------------
+# Internal helper type guards  (lines 452, 455, 462, 465, 471-472, 477, 480)
+# ---------------------------------------------------------------------------
+
+class TestInternalHelpers:
+    def test_extract_po_number_non_dict_payload(self):
+        """_extract_po_number() returns None for non-dict payload."""
+        engine = _make_engine()
+        assert engine._extract_po_number("not a dict") is None
+        assert engine._extract_po_number(None) is None
+        assert engine._extract_po_number(42) is None
+
+    def test_extract_po_number_non_dict_header(self):
+        """_extract_po_number() returns None when payload.header is not a dict."""
+        engine = _make_engine()
+        assert engine._extract_po_number({"header": "not a dict"}) is None
+        assert engine._extract_po_number({"header": 123}) is None
+
+    def test_extract_qty_non_dict_payload(self):
+        """_extract_qty() returns None for non-dict payload."""
+        engine = _make_engine()
+        assert engine._extract_qty("not a dict", "850") is None
+        assert engine._extract_qty(None, "850") is None
+
+    def test_extract_qty_non_dict_header(self):
+        """_extract_qty() returns None when payload.header is not a dict."""
+        engine = _make_engine()
+        assert engine._extract_qty({"header": "not a dict"}, "850") is None
+
+    def test_extract_qty_bad_float_returns_none(self):
+        """_extract_qty() returns None when quantity cannot be cast to float."""
+        engine = _make_engine()
+        assert engine._extract_qty({"header": {"quantity": "not-a-number"}}, "850") is None
+        assert engine._extract_qty({"header": {"quantity": []}}, "850") is None
+
+    def test_extract_n1_qualifier_non_dict_payload(self):
+        """_extract_n1_qualifier() returns None for non-dict payload."""
+        engine = _make_engine()
+        assert engine._extract_n1_qualifier("not a dict") is None
+        assert engine._extract_n1_qualifier(None) is None
+
+    def test_extract_n1_qualifier_non_dict_header(self):
+        """_extract_n1_qualifier() returns None when payload.header is not a dict."""
+        engine = _make_engine()
+        assert engine._extract_n1_qualifier({"header": "not a dict"}) is None
+
+    def test_capture_fields_skips_entry_with_empty_key(self):
+        """_capture_fields() skips capture entries that have no 'key' field."""
+        engine = _make_engine()
+        # Inject a state whose captures list has an entry without a 'key' field
+        engine._loader._states["_test_empty_key_capture"] = {
+            "captures": [
+                {"description": "entry with no key"},   # no 'key' field → skipped
+                {"key": "po_number", "path": "header.po_number"},
+            ]
+        }
+        result = engine._capture_fields(
+            "_test_empty_key_capture",
+            {"header": {"po_number": "P999"}},
+        )
+        # Only the entry with a key should be captured
+        assert "po_number" in result
+        assert result["po_number"] == "P999"
+
+
+# ---------------------------------------------------------------------------
+# _handle_violation: store exception + S3 workspace write  (lines 536-537, 541-542)
+# ---------------------------------------------------------------------------
+
+class TestHandleViolation:
+    def test_store_record_violation_exception_is_swallowed(self):
+        """_handle_violation() logs but does not re-raise if store.record_violation fails."""
+        engine = _make_engine()
+        store = _mock_store()
+        store.record_violation.side_effect = Exception("DB connection lost")
+
+        # Trigger a violation (missing PO#) — the DB write fails but should not crash
+        with patch("lifecycle_engine.engine.StateStore", return_value=store):
+            result = engine.process_event(
+                transaction_set="850",
+                direction="inbound",
+                payload={"header": {}},   # no po_number → missing_po violation
+                source_file="test.edi",
+                correlation_id="corr-store-err",
+                partner_id="lowes",
+            )
+        # Violation was detected; DB write failed silently
+        assert result.success is False
+        assert len(result.violations) > 0
+
+    def test_handle_violation_writes_to_s3_when_workspace_provided(self):
+        """_handle_violation() calls write_violation_to_s3() when workspace is set."""
+        engine = _make_engine()
+        store = _mock_store()
+        mock_ws = MagicMock()
+
+        with patch("lifecycle_engine.engine.StateStore", return_value=store), \
+             patch("lifecycle_engine.s3_writer.write_violation_to_s3") as mock_s3:
+            result = engine.process_event(
+                transaction_set="850",
+                direction="inbound",
+                payload={"header": {}},   # no po_number → missing_po violation
+                source_file="test.edi",
+                correlation_id="corr-s3",
+                partner_id="lowes",
+                workspace=mock_ws,         # S3 write enabled
+            )
+        assert result.success is False
+        mock_s3.assert_called_once()
+        # Workspace must have been passed through
+        call_kwargs = mock_s3.call_args.kwargs
+        assert call_kwargs["workspace"] is mock_ws
