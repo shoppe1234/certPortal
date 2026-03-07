@@ -1,0 +1,119 @@
+---
+# =============================================================================
+# PYKWALIFY META-SCHEMA: EDI Turnaround Mapping YAML Files
+# =============================================================================
+# Validates all files in edi_framework/mappings/*.yaml
+#
+# Required structure:
+#   mapping:
+#     source:  Source transaction ID (3-digit string)
+#     target:  Target transaction ID (3-digit string)
+#     (other keys like description, context, note are permitted)
+#
+#   rules:    Top-level sequence of mapping rules
+#     - id:   Unique rule identifier (required)
+#       rule: Rule type (required when present; see enum below)
+#             Allowed: exact_copy | transform | preferred | not_echoed
+#                      | conditional | optional
+#       (other keys: name, priority, source, target, note, etc. are permitted)
+#
+# Note: 'rules' is a top-level key, NOT nested under 'mapping:'.
+# Note: rules without a 'rule' field are permitted (informational/structural notes).
+# =============================================================================
+
+name: EDI Mapping Schema
+desc: Validates edi_framework/mappings/*.yaml files (pykwalify Layer 0)
+
+type: map
+mapping:
+  mapping:
+    type: map
+    required: True
+    matching-rule: any
+    mapping:
+      source:
+        type: str
+        required: True
+        pattern: "^[0-9]{3}$"
+
+      target:
+        type: str
+        required: True
+        pattern: "^[0-9]{3}$"
+
+      # Optional keys — present in some mapping files
+      description:
+        type: str
+        required: False
+
+      context:
+        type: str
+        required: False
+
+      # Catch-all: allow any other top-level mapping keys
+      regex;(.+):
+        type: any
+
+  rules:
+    type: seq
+    required: True
+    sequence:
+      - type: map
+        matching-rule: any
+        mapping:
+          id:
+            type: str
+            required: True
+
+          name:
+            type: str
+            required: False
+
+          priority:
+            type: str
+            required: False
+            enum:
+              - critical
+              - required
+              - optional
+              - conditional
+              - informational
+
+          rule:
+            type: str
+            required: False
+            enum:
+              - exact_copy
+              - transform
+              - preferred
+              - not_echoed
+              - conditional
+              - optional
+
+          source:
+            type: any
+            required: False
+
+          target:
+            type: any
+            required: False
+
+          required:
+            type: bool
+            required: False
+
+          validation:
+            type: str
+            required: False
+
+          note:
+            type: str
+            required: False
+
+          condition:
+            type: str
+            required: False
+
+          # Catch-all: allow any other rule-level keys
+          regex;(.+):
+            type: any

@@ -16,3 +16,6 @@ pytest==8.3.2
 pytest-asyncio==0.23.8
 playwright==1.46.0
 PyYAML==6.0.2
+psycopg2-binary>=2.9
+pykwalify>=1.8
+pytest-cov>=4.1

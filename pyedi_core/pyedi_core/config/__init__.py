@@ -53,6 +53,7 @@ class DirectoriesConfig(BaseModel):
 
 class AppConfig(BaseModel):
     """Root application configuration."""
+    partner_id: str = Field("unknown", description="Partner/retailer slug (e.g. 'lowes')")
     system: SystemConfig = Field(default_factory=SystemConfig)
     transaction_registry: Dict[str, str] = Field(
         default_factory=dict,

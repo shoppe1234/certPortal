@@ -391,7 +391,34 @@ class Pipeline:
                 logger.info(f"Stage: WRITE")
                 output_path = self._get_output_path(filename, transaction_type)
                 driver.write(transformed_data, output_path)
-            
+
+                # ---- Lifecycle hook (Step 13) ----
+                # Guarded by ImportError so pyedi_core works standalone (NC-04).
+                try:
+                    from lifecycle_engine.interface import (  # noqa: PLC0415
+                        on_document_processed,
+                        DIRECTION_MAP,
+                    )
+                    _direction = DIRECTION_MAP.get(transaction_type, "inbound")
+                    _lc_result = on_document_processed(
+                        transaction_set=transaction_type,
+                        direction=_direction,
+                        payload=transformed_data,
+                        source_file=filename,
+                        correlation_id=correlation_id,
+                        partner_id=getattr(self._config, "partner_id", "unknown"),
+                    )
+                    logger.info(
+                        "lifecycle_event",
+                        state=_lc_result.get("new_state"),
+                        po_number=_lc_result.get("po_number"),
+                    )
+                except ImportError:
+                    pass  # lifecycle_engine not installed — standalone pyedi_core OK
+                except Exception as _lc_exc:
+                    logger.error("lifecycle_hook_error", error=str(_lc_exc))
+                # ---- end lifecycle hook ----
+
             # Return payload if requested
             if do_return_payload:
                 payload = transformed_data

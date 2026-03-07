@@ -1,0 +1,145 @@
+# =============================================================================
+# 865 PO CHANGE ACKNOWLEDGMENT (SELLER INITIATED) - Vendor → Lowe's (Outbound)
+# =============================================================================
+# Version: 004010 | Created: 2026-03-06
+# Functional Group: PC
+# Direction: Outbound (Vendor sends to Lowe's)
+#
+# The 865 is the vendor's response to a Lowe's-initiated 860 PO Change Request.
+# It is a header-only document: no detail segments, no line items.
+#
+# Key facts:
+#   - Lowe's reuses ST01=860 for 865 (envelope quirk — Lowe's spec)
+#   - BCA03 must echo BCH03 from the originating 860
+#   - BCA05 date must be on or after BCH05 (860 date)
+#   - Only two allowed BCA02 values: AT (Accept) or RJ (Reject)
+#   - One 865 per 860 — no line-level detail, header only
+#   - If BCA02=RJ, vendor must communicate reason out-of-band
+#
+# Lifecycle impact:
+#   BCA02=AT → state transitions to 'po_change_accepted'
+#   BCA02=RJ → state transitions to 'po_change_rejected'
+# =============================================================================
+
+transaction:
+  id: "865"
+  name: "PO Change Acknowledgment (Seller Initiated)"
+  functional_group: "PC"
+  direction: outbound
+  version: "004010"
+
+  shared_refs:
+    envelope: shared/envelope.yaml
+    common: shared/common_segments.yaml
+    codelists: shared/codelists.yaml
+
+  # ---------------------------------------------------------------------------
+  # ENVELOPE OVERRIDES (865-specific — Lowe's reuses ST01=860 for 865)
+  # ---------------------------------------------------------------------------
+  envelope_overrides:
+    GS:
+      GS01: { fixed_value: "PC" }
+    ST:
+      ST01: { fixed_value: "860" }   # Lowe's reuses ST01=860 for 865
+
+  # ---------------------------------------------------------------------------
+  # HEADING SEGMENTS
+  # ---------------------------------------------------------------------------
+  heading:
+
+    BCA:
+      name: "Beginning Segment for PO Change Acknowledgment"
+      position: 20
+      usage: mandatory
+      max_use: 1
+      elements:
+        BCA01:
+          name: "Transaction Set Purpose Code"
+          type: ID
+          min_max: "2/2"
+          usage: mandatory
+          fixed_value: "00"
+          note: "Always '00' (Original)"
+        BCA02:
+          name: "Acknowledgment Type"
+          type: ID
+          min_max: "2/2"
+          usage: mandatory
+          allowed_codes: [AT, RJ]
+          business_rules:
+            - code: AT
+              meaning: "Accepted — vendor agrees to the PO change"
+            - code: RJ
+              meaning: "Rejected — vendor declines the PO change; communicate reason out-of-band"
+        BCA03:
+          name: "Purchase Order Number"
+          type: AN
+          min_max: "1/22"
+          usage: mandatory
+          constraints:
+            max_digits: 9
+            format: "zero-suppressed"
+          source:
+            primary: { transaction: "860", segment: "BCH", element: "BCH03" }
+          turnaround:
+            echoes_from:
+              - { transaction: "860", segment: "BCH", element: "BCH03" }
+          note: "Must match BCH03 from the originating 860 (which traces back to BEG03 on the 850)"
+        BCA04:
+          name: "Release Number"
+          type: AN
+          min_max: "1/30"
+          usage: optional
+          note: "Vendor-assigned release number if applicable"
+        BCA05:
+          name: "Date"
+          type: DT
+          min_max: "8/8"
+          usage: mandatory
+          format: "CCYYMMDD"
+          note: "Date assigned by vendor; must be on or after BCH05 (860 date)"
+        BCA12:
+          name: "Change Order Sequence Number"
+          type: AN
+          min_max: "1/8"
+          usage: optional
+          note: "Echo BCH06 from originating 860 when present"
+      business_rules:
+        - "BCA03 must match BCH03 from the originating 860"
+        - "One 865 per 860 — no line-level detail, header only"
+        - "If BCA02=RJ, vendor must communicate reason out-of-band"
+        - "BCA05 date must be on or after BCH05 (860 date)"
+
+  # ---------------------------------------------------------------------------
+  # SUMMARY SEGMENTS
+  # ---------------------------------------------------------------------------
+  summary:
+
+    CTT:
+      name: "Transaction Totals"
+      position: 10
+      usage: optional
+      max_use: 1
+      elements:
+        CTT01:
+          name: "Number of Line Items"
+          type: N0
+          min_max: "1/6"
+          usage: mandatory
+          computed: "Always 0 for 865 — header-only response with no detail segments"
+
+  # ---------------------------------------------------------------------------
+  # RELATIONSHIP TO OTHER DOCUMENTS
+  # ---------------------------------------------------------------------------
+  relationships:
+    originates_from: "860"
+    echoes_po_from: "850"
+    response_note: >
+      The 865 is the vendor's acceptance or rejection of a Lowe's 860 PO Change.
+      BCA03 echoes BCH03 from the 860, which itself echoes BEG03 from the 850.
+      The PO number chain is fully preserved.
+    lifecycle_impact: >
+      An accepted 865 (BCA02=AT) transitions the order lifecycle to
+      'po_change_accepted'. A rejected 865 (BCA02=RJ) transitions to
+      'po_change_rejected'. Either state allows subsequent 856 ASN
+      and 810 invoice to proceed against the current PO terms.

@@ -1,0 +1,99 @@
+---
+# =============================================================================
+# PYKWALIFY META-SCHEMA: EDI Lifecycle State Machine YAML Files
+# =============================================================================
+# Validates edi_framework/lifecycle/order_to_cash.yaml (and any future
+# lifecycle files added under lifecycle/).
+#
+# Required structure:
+#   lifecycle:
+#     name:        Human-readable name
+#     version:     Version string
+#     primary_key: PO number primary key configuration (map)
+#     states:      State machine definitions (map of state name → state config)
+#
+# Each state must define:
+#   trigger:
+#     document:   Transaction set ID (e.g. "850")
+#     direction:  "inbound" or "outbound"
+#   valid_transitions:  (optional for terminal states)
+#     - to:       target state name
+#       via:      triggering transaction set
+#       condition: human-readable condition note (optional)
+#
+# Additional keys at any level are allowed via matching-rule: any.
+# =============================================================================
+
+name: EDI Lifecycle Schema
+desc: Validates edi_framework/lifecycle/*.yaml files (pykwalify Layer 0)
+
+type: map
+matching-rule: any
+mapping:
+  lifecycle:
+    type: map
+    required: True
+    matching-rule: any
+    mapping:
+      name:
+        type: str
+        required: True
+
+      version:
+        type: str
+        required: True
+
+      primary_key:
+        type: map
+        required: True
+        matching-rule: any
+        mapping:
+          name:
+            type: str
+            required: True
+          regex;(.+):
+            type: any
+
+      states:
+        type: map
+        required: True
+        allowempty: False
+        matching-rule: any
+        mapping:
+          regex;(.+):
+            type: map
+            matching-rule: any
+            mapping:
+              trigger:
+                type: map
+                required: True
+                matching-rule: any
+                mapping:
+                  document:
+                    type: str
+                    required: True
+                    pattern: "^[0-9]{3}$"
+                  direction:
+                    type: str
+                    required: True
+                    enum: ['inbound', 'outbound']
+                  # condition and other keys are optional in trigger
+                  regex;(.+):
+                    type: any
+
+              # valid_transitions is optional for terminal states
+              valid_transitions:
+                type: seq
+                required: False
+                sequence:
+                  - type: any
+
+              # All other state-level keys are permitted (description,
+              # captures, validations, is_terminal, processing, etc.)
+              regex;(.+):
+                type: any
+
+      # Other lifecycle-level keys (quantity_chain, n1_qualifier_map,
+      # global_validations, transition_diagram, etc.) are permitted
+      regex;(.+):
+        type: any

@@ -1,0 +1,79 @@
+---
+# =============================================================================
+# PYKWALIFY META-SCHEMA: EDI Transaction YAML Files
+# =============================================================================
+# Validates all files in edi_framework/transactions/*.yaml
+#
+# Required fields (enforced):
+#   transaction.id               — 3-digit string
+#   transaction.name             — human-readable name
+#   transaction.functional_group — GS01 code
+#   transaction.direction        — "inbound" or "outbound"
+#   transaction.version          — X12 version string
+#   transaction.shared_refs      — map with at least envelope key
+#   transaction.heading          — non-empty map of segment definitions
+#
+# Additional keys at the transaction level are permitted (matching-rule: any).
+# Individual transaction files may include: processing, business_rules,
+# change_cancel_rules, order_types, asn_formats, cross_dock_rules,
+# examples, envelope_overrides, detail, summary, relationships, etc.
+# =============================================================================
+
+name: EDI Transaction Schema
+desc: Validates edi_framework/transactions/*.yaml files (pykwalify Layer 0)
+
+type: map
+matching-rule: any
+mapping:
+  transaction:
+    type: map
+    required: True
+    matching-rule: any
+    mapping:
+      id:
+        type: str
+        required: True
+        pattern: "^[0-9]{3}$"
+
+      name:
+        type: str
+        required: True
+
+      functional_group:
+        type: str
+        required: True
+
+      direction:
+        type: str
+        required: True
+        enum: ['inbound', 'outbound']
+
+      version:
+        type: str
+        required: True
+
+      shared_refs:
+        type: map
+        required: True
+        matching-rule: any
+        mapping:
+          envelope:
+            type: str
+            required: True
+          regex;(.+):
+            type: any
+
+      heading:
+        type: map
+        required: True
+        allowempty: False
+        matching-rule: any
+        mapping:
+          regex;(.+):
+            type: any
+
+      # All additional keys are permitted via the regex catch-all below.
+      # Examples: envelope_overrides, detail, summary, relationships,
+      # processing, order_types, business_rules, change_cancel_rules, etc.
+      regex;(.+):
+        type: any

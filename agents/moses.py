@@ -168,6 +168,44 @@ def run(
         yaml_map=yaml_map,
     )
 
+    # 5b. Lifecycle hook (Step 13b) — Moses bypasses Pipeline.run(), so the hook
+    #     in pipeline.py will not fire. We call on_document_processed() directly.
+    #     Guarded by ImportError so Moses works without lifecycle_engine (NC-04).
+    try:
+        from lifecycle_engine.interface import on_document_processed, DIRECTION_MAP  # noqa: PLC0415
+        import uuid as _uuid  # noqa: PLC0415
+        _lc_payload = {
+            "header": {
+                "po_number": _extract_po_from_edi(edi_content, transaction_type),
+            }
+        }
+        _lc_direction = DIRECTION_MAP.get(transaction_type, "inbound")
+        _lc_result = on_document_processed(
+            transaction_set=transaction_type,
+            direction=_lc_direction,
+            payload=_lc_payload,
+            source_file=raw_edi_s3_key,
+            correlation_id=str(_uuid.uuid4()),
+            partner_id=retailer_slug,
+            workspace=workspace,
+        )
+        monica_logger.log(
+            "MOSES", "A",
+            f"lifecycle_event: state={_lc_result.get('new_state')} "
+            f"po={_lc_result.get('po_number')} success={_lc_result.get('success')}",
+            retailer_slug=retailer_slug,
+            supplier_slug=supplier_slug,
+        )
+    except ImportError:
+        pass  # lifecycle_engine not installed — standalone Moses mode OK
+    except Exception as _lc_exc:
+        monica_logger.log(
+            "MOSES", "Q",
+            f"lifecycle_hook_error (non-fatal): {_lc_exc!r}",
+            retailer_slug=retailer_slug,
+            supplier_slug=supplier_slug,
+        )
+
     # 6. Build ValidationResult
     errors = [
         ValidationError(
@@ -321,6 +359,46 @@ async def _insert_test_occurrence(result: ValidationResult) -> None:
             result.status,
             result.model_dump_json(),
         )
+
+
+def _extract_po_from_edi(edi_content: str, transaction_type: str) -> str | None:
+    """
+    Best-effort extraction of the PO number from raw X12 EDI content.
+
+    Covers the six lifecycle transaction types:
+      850 → BEG03, 860 → BCH03, 855 → BAK03,
+      865 → BCA03, 856 → PRF01, 810 → BIG04
+
+    Returns None if the segment cannot be found (lifecycle engine will log a
+    non-fatal missing_po violation in development/strict_mode=False).
+    """
+    import re  # noqa: PLC0415
+
+    # Segment → element position (0-indexed after splitting on *)
+    _patterns: dict[str, tuple[str, int]] = {
+        "850": ("BEG", 3),   # BEG*BT*SA*<PO#>*...
+        "860": ("BCH", 3),   # BCH*00*PC*<PO#>*...
+        "855": ("BAK", 3),   # BAK*00*AD*<PO#>*...
+        "865": ("BCA", 3),   # BCA*00*AT*<PO#>*...
+        "856": ("PRF", 1),   # PRF*<PO#>*...
+        "810": ("BIG", 4),   # BIG*<inv_date>*<inv#>*<po_date>*<PO#>*...
+    }
+
+    seg_name, elem_idx = _patterns.get(transaction_type, ("BEG", 3))
+    # Match segment including element separator *, accounting for ~ or \n line endings
+    pattern = rf"{re.escape(seg_name)}\*([^~\r\n]*)"
+    match = re.search(pattern, edi_content)
+    if not match:
+        return None
+
+    elements = match.group(1).split("*")
+    # elem_idx is 1-based in X12 (BEG01, BEG02, BEG03...) but already 0-indexed above
+    # elements[0] = first element after segment ID, so index = elem_idx - 1
+    target_idx = elem_idx - 1
+    if target_idx < len(elements):
+        val = elements[target_idx].strip()
+        return val if val else None
+    return None
 
 
 def _utcnow_iso() -> str:

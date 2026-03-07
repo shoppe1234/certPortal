@@ -1,0 +1,17 @@
+# lifecycle_engine/config.yaml
+# Engine runtime configuration.
+# framework_base_path is relative to this file's directory.
+
+lifecycle_engine:
+  framework_base_path: '../edi_framework'   # relative to lifecycle_engine/
+  log_level: INFO
+  singleton: true
+
+  profiles:
+    development:
+      strict_mode: false    # log violations, do not fail pipeline
+    production:
+      strict_mode: true     # violations route file to failed/
+
+  s3:
+    violations_prefix: 'lifecycle/violations/'   # under retailer/supplier scope
