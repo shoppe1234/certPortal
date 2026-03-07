@@ -1,0 +1,91 @@
+# =============================================================================
+# TURNAROUND MAPPING: 860 PO Change Request → 865 PO Change Acknowledgment
+# =============================================================================
+# The 865 is the vendor's response to a Lowe's-initiated 860 PO Change.
+# It is extremely lightweight: envelope + BCA segment + trailer.
+#
+# Key: The 865 echoes the PO number from BCH03 into BCA03 and indicates
+# whether the change was accepted (AT) or rejected (RJ).
+#
+# Note: The 865 reuses functional group code PC and ST01=860 in the envelope
+# (per Lowe's spec), making it structurally an 860 response rather than a
+# distinct transaction type.
+# =============================================================================
+
+mapping:
+  source: "860"
+  target: "865"
+  description: "PO Change Request to PO Change Acknowledgment turnaround rules"
+
+rules:
+
+  # ---------------------------------------------------------------------------
+  # CRITICAL: Purchase Order Number
+  # ---------------------------------------------------------------------------
+  - id: po_number
+    name: "Purchase Order Number"
+    priority: critical
+    source:
+      segment: BCH
+      element: BCH03
+    target:
+      segment: BCA
+      element: BCA03
+    rule: exact_copy
+    required: true
+    validation: "BCA03 must exactly match BCH03 from the inbound 860"
+    note: >
+      This links the vendor's acknowledgment back to the specific PO
+      change request, and transitively to the original 850 PO.
+
+  # ---------------------------------------------------------------------------
+  # RESPONSE FIELDS (vendor-generated, not echoed from 860)
+  # ---------------------------------------------------------------------------
+  - id: response_type
+    name: "BCA01 — Acknowledgment Type"
+    priority: required
+    rule: not_echoed
+    note: >
+      BCA01 is always fixed at '11' (Response). This is vendor-generated
+      and not derived from any 860 field.
+
+  - id: acceptance_code
+    name: "BCA02 — Acceptance/Rejection"
+    priority: required
+    rule: not_echoed
+    note: >
+      BCA02 is the vendor's decision:
+        AT = Accepted (vendor agrees to the PO change)
+        RJ = Rejected (vendor declines the PO change)
+      This is vendor-determined, not echoed from the 860.
+
+  # ---------------------------------------------------------------------------
+  # FIELDS NOT CARRIED OVER
+  # ---------------------------------------------------------------------------
+  - id: line_items_not_echoed
+    name: "Line Item Detail"
+    rule: not_echoed
+    note: >
+      The 865 has NO detail segments. It is a header-only response.
+      The 860 POC line items are not echoed — the 865 is a blanket
+      accept/reject of the entire change request.
+
+  - id: dtm_not_echoed
+    name: "Date/Time Reference"
+    rule: not_echoed
+    note: "860 DTM*002/010 dates are not echoed on the 865."
+
+  - id: n1_not_echoed
+    name: "N1 Name Loop"
+    rule: not_echoed
+    note: "860 N1 (ship-to, cross-dock) is not echoed on the 865."
+
+  - id: fob_not_echoed
+    name: "FOB"
+    rule: not_echoed
+    note: "860 FOB is not echoed on the 865."
+
+  - id: cur_not_echoed
+    name: "Currency"
+    rule: not_echoed
+    note: "860 CUR is not echoed on the 865."

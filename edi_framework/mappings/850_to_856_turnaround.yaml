@@ -1,0 +1,247 @@
+# =============================================================================
+# TURNAROUND MAPPING: 850 Purchase Order → 856 Advance Ship Notice
+# =============================================================================
+# These rules define which fields from the inbound 850 must be echoed,
+# transformed, or referenced on the outbound 856 ASN.
+#
+# The 856 has a hierarchical structure (S/O/T/I) rather than the flat
+# heading/detail pattern of other documents. Target elements are annotated
+# with their HL level.
+# =============================================================================
+
+mapping:
+  source: "850"
+  target: "856"
+  description: "PO-to-ASN turnaround rules per Lowe's spec"
+
+rules:
+
+  # ---------------------------------------------------------------------------
+  # CRITICAL: Purchase Order Number
+  # ---------------------------------------------------------------------------
+  - id: po_number
+    name: "Purchase Order Number"
+    priority: critical
+    source:
+      segment: BEG
+      element: BEG03
+    target:
+      segment: PRF
+      element: PRF01
+      hl_level: "O (Order)"
+    rule: exact_copy
+    required: true
+    validation: >
+      PRF01 must exactly match BEG03 from the originating 850.
+      Display this value as the Customer PO # on packing lists and BOL.
+    constraint: "One PO per ASN — each ASN can contain only one purchase order."
+
+  # ---------------------------------------------------------------------------
+  # SHIPMENT LEVEL (HL03=S): Carrier Details
+  # ---------------------------------------------------------------------------
+  - id: carrier_scac
+    name: "Carrier SCAC Code"
+    priority: required
+    source:
+      segment: TD5
+      element: TD503
+    target:
+      segment: TD5
+      element: TD503
+      hl_level: "S (Shipment)"
+    rule: exact_copy
+    note: >
+      If SCAC is available, send TD502=2 and SCAC in TD503.
+      If SCAC unavailable, send TD502=91 and free-form carrier name in TD503.
+
+  # ---------------------------------------------------------------------------
+  # SHIPMENT LEVEL (HL03=S): FOB
+  # ---------------------------------------------------------------------------
+  - id: fob_payment_method
+    name: "FOB Shipment Method of Payment"
+    priority: required
+    source:
+      segment: FOB
+      element: FOB01
+    target:
+      segment: FOB
+      element: FOB01
+      hl_level: "S (Shipment)"
+    rule: exact_copy
+    required: true
+    note: "856 supports CC, CF, PC, PP — same as 850"
+
+  # ---------------------------------------------------------------------------
+  # SHIPMENT LEVEL (HL03=S): Ship Date
+  # ---------------------------------------------------------------------------
+  - id: ship_date
+    name: "Date/Time — Shipped"
+    priority: required
+    rule: not_echoed
+    note: >
+      850 uses DTM*010 (Requested Ship) and DTM*002 (Delivery Requested).
+      856 shipment level uses DTM*011 (Shipped) — the actual ship date.
+      Vendor populates with actual date the truck was sealed/left the facility.
+
+  # ---------------------------------------------------------------------------
+  # ORDER LEVEL (HL03=O): Vendor Number
+  # ---------------------------------------------------------------------------
+  - id: vendor_number
+    name: "Internal Vendor Number"
+    priority: required
+    source:
+      segment: REF
+      filter: { REF01: IA }
+      element: REF02
+    target:
+      segment: REF
+      filter: { REF01: IA }
+      element: REF02
+      hl_level: "O (Order)"
+    rule: exact_copy
+    required: true
+    note: "REF*IA is mandatory at the order level for both Detail and Summary ASNs."
+
+  # ---------------------------------------------------------------------------
+  # ORDER LEVEL (HL03=O): Estimated Arrival Date
+  # ---------------------------------------------------------------------------
+  - id: estimated_arrival
+    name: "Estimated Arrival Date"
+    priority: required
+    source:
+      segment: DTM
+      filter: { DTM01: "002" }
+      element: DTM02
+    target:
+      segment: DTM
+      filter: { DTM01: "067" }
+      element: DTM02
+      hl_level: "O (Order)"
+    rule: transform
+    transforms:
+      DTM01:
+        from: "002"     # 850 uses "Delivery Requested"
+        to: "067"       # 856 uses "Current Schedule Delivery"
+    note: >
+      The 850 delivery date (DTM*002) becomes the estimated arrival date
+      (DTM*067) at the order level. Vendor may adjust based on actual
+      shipping schedule.
+
+  # ---------------------------------------------------------------------------
+  # ORDER LEVEL (HL03=O): Ship To / Cross-Dock
+  # ---------------------------------------------------------------------------
+  - id: ship_to_store
+    name: "Ship To Location"
+    priority: required
+    source:
+      segment: N1
+      filter: { N101: ST }
+      elements: [N101, N104]
+    target:
+      segment: N1
+      filter: { N101: ST }
+      elements: [N101, N104]
+      hl_level: "O (Order)"
+    rule: transform
+    required: true
+    transforms:
+      N103:
+        from: "93"    # 850 uses "code assigned by originating org"
+        to: "94"      # 856 uses "code assigned by ultimate destination org"
+
+  - id: ultimate_destination
+    name: "Ultimate Store Destination (Cross-Dock)"
+    priority: conditional
+    condition: "Present only when 850 contains N1*MA loop"
+    source:
+      segment: N1
+      filter: { N101: MA }
+      elements: [N101, N104]
+    target:
+      segment: N1
+      filter: { N101: MA }
+      elements: [N101, N104]
+      hl_level: "O (Order)"
+    rule: transform
+    transforms:
+      N103:
+        from: "93"
+        to: "94"
+    cross_dock_note: >
+      For cross-dock orders, ST = distribution center (delivery location),
+      MA = final store destination. ASN must include both.
+
+  # ---------------------------------------------------------------------------
+  # ORDER LEVEL (HL03=O): Packaging
+  # ---------------------------------------------------------------------------
+  - id: packaging
+    name: "Marking, Packaging, Loading"
+    priority: required
+    rule: not_echoed
+    note: >
+      PKG is mandatory at order level on the 856 but does not come from
+      the 850. Vendor determines packaging method:
+      PKG06=01 (Palletized) or PKG06=02 (Floor Stack/Hand Pile).
+
+  # ---------------------------------------------------------------------------
+  # ITEM LEVEL (HL03=I): Product Identification
+  # ---------------------------------------------------------------------------
+  - id: line_items
+    name: "Item Identification"
+    priority: required
+    source:
+      segment: PO1
+      elements: [PO106, PO107]
+    target:
+      segment: LIN
+      elements: [LIN02, LIN03]
+      hl_level: "I (Item)"
+    rule: exact_copy
+    required: true
+    note: >
+      Prefer Lowe's item number (CB). If unavailable, send UPC.
+      856 LIN uses the same product identification as 850 PO1.
+
+  - id: item_quantity
+    name: "Quantity Shipped"
+    priority: required
+    source:
+      segment: PO1
+      elements: [PO102, PO103]
+    target:
+      segment: SN1
+      elements: [SN102, SN103]
+      hl_level: "I (Item)"
+    rule: preferred
+    note: >
+      SN1 quantity should reflect actual units shipped. UOM must match the PO.
+      If 855 ACK exists, quantity shipped should be <= acknowledged quantity.
+      Items with ACK01=ID (deleted) should NOT appear in the 856.
+
+  # ---------------------------------------------------------------------------
+  # FIELDS NOT CARRIED OVER
+  # ---------------------------------------------------------------------------
+  - id: dtm_not_echoed
+    name: "Date/Time Reference"
+    rule: not_echoed
+    note: >
+      850 uses DTM*002 (Delivery Requested) and DTM*010 (Requested Ship).
+      856 uses DTM*011 (Shipped) at shipment level and DTM*067 (Current
+      Schedule Delivery) at order level. Vendor populates with actual dates.
+
+  - id: sac_not_echoed
+    name: "SAC Allowance/Charge"
+    rule: not_echoed
+    note: "850 SAC (e.g., E740 New Store Allowance) is NOT carried to the 856."
+
+  - id: per_not_echoed
+    name: "Administrative Contact"
+    rule: not_echoed
+    note: >
+      850 PER uses BD (Buyer) and DC (Delivery Contact).
+      856 does not carry PER segments.
+
+  - id: pid_not_echoed
+    name: "Product/Item Description"
+    rule: not_echoed
+    note: "PID is not used on the 856. Only LIN (item ID) and SN1 (quantity) at item level."

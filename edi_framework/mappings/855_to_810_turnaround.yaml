@@ -1,0 +1,141 @@
+# =============================================================================
+# TURNAROUND MAPPING: 855 Reverse PO → 810 Invoice
+# =============================================================================
+# When a vendor-initiated 855 reverse PO creates the order (no originating
+# 850 from Lowe's), these rules govern what must appear on the 810 invoice.
+#
+# This path is used for VMI (Vendor Managed Inventory) scenarios where
+# the vendor creates the PO via the 855 and then invoices via the 810.
+# =============================================================================
+
+mapping:
+  source: "855"
+  target: "810"
+  description: "Reverse PO-to-Invoice turnaround rules"
+  context: >
+    Applies when no Lowe's 850 exists. The 855 reverse PO is the
+    originating document, and the 810 must reference it.
+
+rules:
+
+  # ---------------------------------------------------------------------------
+  # CRITICAL: Purchase Order Number
+  # ---------------------------------------------------------------------------
+  - id: po_number
+    name: "Purchase Order Number"
+    priority: critical
+    source:
+      segment: BAK
+      element: BAK03
+    target:
+      segment: BIG
+      element: BIG04
+    rule: exact_copy
+    required: true
+    note: >
+      When no 850 exists, the BAK03 from the 855 is the authoritative
+      PO number that must appear in BIG04 on the invoice.
+
+  # ---------------------------------------------------------------------------
+  # HEADING: Location/Ship-To
+  # ---------------------------------------------------------------------------
+  - id: ship_to_store
+    name: "Ship To Location"
+    priority: required
+    source:
+      segment: N1
+      filter: { N101: ST }
+      element: N104
+    target:
+      segment: N1
+      filter: { N101: ST }
+      element: N104
+    rule: transform
+    transforms:
+      N103:
+        from: "94"    # 855 uses qualifier 94
+        to: "92"      # 810 uses qualifier 92
+
+  - id: cross_dock_destination
+    name: "Ultimate Store Destination (Cross-Dock)"
+    priority: conditional
+    condition: "Present only on cross-dock orders"
+    source:
+      segment: N1
+      filter: { N101: MA }
+      element: N104
+    target:
+      segment: N1
+      filter: { N101: MA }
+      element: N104
+    rule: transform
+    transforms:
+      N103:
+        from: "94"
+        to: "92"
+    cross_dock_invoice_rule: >
+      Invoice must be for the MA (ultimate store) destination,
+      NOT the ST (distribution center). One invoice per ultimate
+      store destination PO.
+
+  # ---------------------------------------------------------------------------
+  # HEADING: FOB
+  # ---------------------------------------------------------------------------
+  - id: fob_payment_method
+    name: "FOB Shipment Method"
+    priority: required
+    source:
+      segment: FOB
+      element: FOB01
+    target:
+      segment: FOB
+      element: FOB01
+    rule: exact_copy
+    note: "855 supports CC and PP; 810 accepts CC, CF, PC, PP"
+
+  # ---------------------------------------------------------------------------
+  # DETAIL: Line items
+  # ---------------------------------------------------------------------------
+  - id: line_items
+    name: "Baseline Item Data"
+    priority: required
+    source:
+      segment: PO1
+      elements: [PO102, PO103, PO106, PO107]
+    target:
+      segment: IT1
+      elements: [IT102, IT103, IT106, IT107]
+    rule: exact_copy
+    required: true
+    note: >
+      Map 855 PO1 to 810 IT1. Use quantities from the ACK segment
+      (acknowledged/accepted quantities) NOT the original PO1 quantities
+      if they differ due to IQ (quantity changed) or ID (item deleted).
+
+  - id: ack_quantity_override
+    name: "ACK Quantity Takes Precedence"
+    priority: informational
+    note: >
+      When ACK01=IQ (quantity changed), the invoice quantity (IT102)
+      should reflect ACK02 (the accepted quantity), not PO102 (the
+      originally requested quantity).
+      When ACK01=ID (item deleted), the item should NOT appear on
+      the 810 invoice at all.
+
+  # ---------------------------------------------------------------------------
+  # FIELDS NOT CARRIED OVER
+  # ---------------------------------------------------------------------------
+  - id: dtm_not_echoed
+    name: "Date/Time Reference"
+    rule: not_echoed
+    note: >
+      855 uses DTM*067/068 (Current Schedule Delivery/Ship).
+      810 uses DTM*011 (Shipped) and DTM*008 (PO Received).
+      Vendor must populate with actual dates.
+
+  - id: price_not_echoed
+    name: "Unit Price"
+    rule: not_echoed
+    note: >
+      855 PO104 is optional and not used by Lowe's even if sent.
+      810 IT104 must contain the agreed-upon unit price.

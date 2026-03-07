@@ -1,0 +1,248 @@
+# =============================================================================
+# SHARED CODE LISTS
+# =============================================================================
+# Centralized code values used across multiple transaction types.
+# Individual transaction YAMLs reference these by codelist name
+# and may restrict to a subset via `allowed_codes`.
+# =============================================================================
+
+codelists:
+
+  entity_identifier:
+    description: "N1-01 Entity Identifier Code"
+    codes:
+      ST: "Ship To"
+      MA: "Party for whom Item is Ultimately Intended"
+      SF: "Ship From"
+      RI: "Remit To"
+      SE: "Selling Party"
+      BD: "Buyer Name or Department"
+      DC: "Delivery Contact"
+      OC: "Order Contact"
+
+  identification_code_qualifier:
+    description: "N1-03 / Identification Code Qualifier"
+    codes:
+      "2": "Standard Carrier Alpha Code (SCAC)"
+      "91": "Assigned by Seller or Seller's Agent"
+      "92": "Assigned by Buyer or Buyer's Agent"
+      "93": "Code assigned by the organization originating the transaction set"
+      "94": "Code assigned by the org that is the ultimate destination of the txn set"
+
+  shipment_method_of_payment:
+    description: "FOB-01 Shipment Method of Payment"
+    codes:
+      CC: "Collect"
+      CF: "Collect, Freight Credited Back to Customer"
+      PC: "Prepaid but Charged to Customer"
+      PP: "Prepaid (by Seller)"
+
+  currency_code:
+    description: "CUR-02 ISO 4217 Currency Code"
+    codes:
+      USD: "US Dollar"
+      CAD: "Canadian Dollar"
+      MXN: "Mexican Peso"
+
+  country_code:
+    description: "N4-04 ISO 3166 Country Code"
+    codes:
+      USA: "United States"
+      CAN: "Canada"
+      MEX: "Mexico"
+
+  product_service_id_qualifier:
+    description: "IT1/PO1/LIN Product/Service ID Qualifier"
+    codes:
+      CB: "Buyer's Catalog Number (Lowe's SKU)"
+      EN: "EAN/UCC-13"
+      UK: "U.P.C./EAN Shipping Container Code (EAN/UCC-14)"
+      UP: "U.P.C. Consumer Package Code (1-5-5-1)"
+      VC: "Vendor's (Seller's) Catalog Number"
+
+  unit_of_measure:
+    description: "Common UOM codes"
+    note: "All valid X12 codes accepted; common ones listed"
+    codes:
+      EA: "Each"
+      CA: "Case"
+      PL: "Pallet/Unit Load"
+      S9: "Slip Sheet"
+      LB: "Pound"
+      CF: "Cubic Feet"
+
+  sac_charge_codes:
+    description: "SAC-02 Service/Promotion/Allowance/Charge codes"
+    codes:
+      A260: "Advertising Allowance"
+      A720: "Broken Package Charge"
+      B940: "Cutting Charge"
+      C000: "Defective Allowance"
+      C680: "Environmental Protection Service"
+      D240: "Freight"
+      D270: "Fuel Surcharge"
+      D500: "Handling"
+      D530: "Hazardous Cargo Charge"
+      E740: "New Store Allowance"
+      F180: "Pallet"
+      G090: "Recovery Fee (CA Carpet Stewardship)"
+      G470: "Restocking Charge"
+      G870: "Shrink-Wrap Charge"
+      H000: "Special Allowance"
+      H850: "Tax (Excise Tax HI/AK)"
+
+  sac_charge_codes_sos_only:
+    description: "SAC codes permitted on SOS invoices only"
+    codes:
+      C680: "Environmental Protection Service"
+      G090: "California Carpet Stewardship Assessment Fee"
+      H850: "Excise Tax for Hawaii and Alaska only"
+
+  tax_type:
+    description: "TXI-01 Tax Type Code (Canada/Mexico)"
+    codes:
+      CG: "Federal Value-added Tax (GST) on Goods"
+      OH: "Other Taxes (Quebec QST)"
+      PG: "State or Provincial Tax on Goods (PST)"
+      VA: "Value Added Tax (Mexico IVA)"
+      ZZ: "Mutually Defined (Canada HST)"
+
+  purchase_order_type:
+    description: "BEG-02 / BCH-02 Purchase Order Type Code"
+    codes:
+      SA: "Stand-alone Order"
+      NS: "New Store Opening"
+      SP: "Display Order"
+      CP: "Change to Purchase Order"
+
+  po_change_purpose:
+    description: "BCH-01 Transaction Set Purpose Code (860)"
+    codes:
+      "01": "Cancellation"
+      "05": "Replace"
+
+  po_change_line_action:
+    description: "POC-02 Change or Response Type Code (860)"
+    codes:
+      NC: "Concurrent Item (No Change)"
+      RZ: "Replace All Values"
+
+  po_ack_purpose:
+    description: "BAK-01 Transaction Set Purpose Code (855)"
+    codes:
+      "00": "Original"
+      "01": "Cancellation"
+      "05": "Replace"
+      "06": "Confirmation"
+
+  po_ack_type:
+    description: "BAK-02 Acknowledgment Type (855)"
+    codes:
+      AC: "Acknowledge - With Detail and Change"
+      AD: "Acknowledge - With Detail, No Change"
+      RJ: "Rejected - No Detail"
+
+  po_change_ack_type:
+    description: "BCA-01 Acknowledgment Type (865)"
+    codes:
+      "11": "Response"
+
+  po_change_ack_status:
+    description: "BCA-02 Acceptance/Rejection (865)"
+    codes:
+      AT: "Accepted"
+      RJ: "Rejected"
+
+  line_item_status:
+    description: "ACK-01 Line Item Status Code"
+    codes:
+      IA: "Item Accepted"
+      ID: "Item Deleted"
+      IQ: "Item Accepted - Quantity Changed"
+
+  asn_purpose:
+    description: "BSN-01 Transaction Set Purpose Code (856)"
+    codes:
+      "00": "Original"
+      "05": "Replace"
+
+  hierarchical_level_code:
+    description: "HL-03 Hierarchical Level Code (856)"
+    codes:
+      S: "Shipment"
+      O: "Order"
+      T: "Shipping Tare (Pallet)"
+      I: "Item"
+
+  hierarchical_structure_code:
+    description: "BSN-05 Hierarchical Structure Code (856)"
+    codes:
+      "0001": "Shipment, Order, Packaging, Item (Detail ASN with GS1-128)"
+      "0004": "Shipment, Order, Item (Summary ASN without GS1-128)"
+
+  packaging_code:
+    description: "TD1-01 Packaging Code (856)"
+    codes:
+      CTN: "Carton"
+      PLT: "Pallet"
+      SLP: "Slip Sheet"
+
+  equipment_description_code:
+    description: "TD3-01 Equipment Description Code (856)"
+    codes:
+      2B: "20 ft. IL Container (Closed Top)"
+      4B: "40 ft. IL Container (Closed Top)"
+      BX: "Boxcar"
+      CV: "Closed Van"
+      FT: "Flat Bed Trailer"
+      RF: "Flat Car (rail)"
+      RT: "Controlled Temperature Trailer (Reefer)"
+
+  transportation_method:
+    description: "TD5-04 Transportation Method/Type Code (856)"
+    codes:
+      M: "Motor (Common Carrier)"
+      R: "Rail"
+      U: "Private Parcel Service"
+      LT: "Less Than Trailer Load (LTL)"
+
+  unit_load_option:
+    description: "PKG-06 Unit Load Option Code (856)"
+    codes:
+      "01": "Palletized"
+      "02": "Floor Stack/Hand Pile"
+
+  marks_and_numbers_qualifier:
+    description: "MAN-01 Marks and Numbers Qualifier (856)"
+    codes:
+      GM: "SSCC-18 and Application Identifier"
+
+  reference_id_qualifier:
+    description: "REF-01 Reference Identification Qualifier"
+    codes:
+      AN: "VPXD Truck Load Number"
+      BM: "Bill of Lading Number"
+      CN: "Carrier's Reference Number (PRO/Invoice)"
+      DP: "Department Number"
+      IA: "Internal Vendor Number"
+      MB: "Master Bill of Lading"
+      WO: "Replenishment Program (RP) Reference Number"
+
+  date_time_qualifier:
+    description: "DTM-01 Date/Time Qualifier"
+    codes:
+      "002": "Delivery Requested (850, 860)"
+      "008": "Purchase Order Received (810)"
+      "010": "Requested Ship (850, 855, 860)"
+      "011": "Shipped (810, 856)"
+      "067": "Current Schedule Delivery (855, 856)"
+      "068": "Current Schedule Ship (855)"
+
+  time_code:
+    description: "DTM-04 Time Zone Code (856)"
+    codes:
+      CT: "Central Time"
+      ET: "Eastern Time"
+      LT: "Local Time"
+      MT: "Mountain Time"
+      PT: "Pacific Time"

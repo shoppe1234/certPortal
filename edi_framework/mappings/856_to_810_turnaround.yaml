@@ -1,0 +1,174 @@
+# =============================================================================
+# TURNAROUND MAPPING: 856 Advance Ship Notice → 810 Invoice
+# =============================================================================
+# The 856 ASN carries the actual shipped quantities and carrier details
+# that must be reflected on the subsequent 810 invoice. This mapping
+# governs what must carry from the ASN to the invoice.
+# =============================================================================
+
+mapping:
+  source: "856"
+  target: "810"
+  description: "ASN-to-Invoice turnaround rules"
+  context: >
+    The 856 is the authoritative source for what was actually shipped.
+    Invoice quantities should not exceed shipped quantities.
+
+rules:
+
+  # ---------------------------------------------------------------------------
+  # CRITICAL: Purchase Order Number
+  # ---------------------------------------------------------------------------
+  - id: po_number
+    name: "Purchase Order Number"
+    priority: critical
+    source:
+      segment: PRF
+      element: PRF01
+      hl_level: "O (Order)"
+    target:
+      segment: BIG
+      element: BIG04
+    rule: exact_copy
+    required: true
+    validation: "BIG04 must match PRF01 from the 856 (and BEG03 from the 850)"
+
+  # ---------------------------------------------------------------------------
+  # HEADING: Carrier Details → CAD
+  # ---------------------------------------------------------------------------
+  - id: carrier_scac
+    name: "Carrier SCAC Code"
+    priority: required
+    source:
+      segment: TD5
+      element: TD503
+      hl_level: "S (Shipment)"
+    target:
+      segment: CAD
+      element: CAD04
+    rule: exact_copy
+    note: >
+      Echo SCAC from the 856 TD5 at shipment level into CAD04 on the 810.
+      If SCAC unavailable, populate CAD05 with carrier name instead.
+
+  # ---------------------------------------------------------------------------
+  # HEADING: Ship To / Cross-Dock
+  # ---------------------------------------------------------------------------
+  - id: ship_to_store
+    name: "Ship To Location"
+    priority: required
+    source:
+      segment: N1
+      filter: { N101: ST }
+      element: N104
+      hl_level: "O (Order)"
+    target:
+      segment: N1
+      filter: { N101: ST }
+      element: N104
+    rule: transform
+    transforms:
+      N103:
+        from: "94"    # 856 uses qualifier 94
+        to: "92"      # 810 uses qualifier 92
+
+  - id: cross_dock_destination
+    name: "Ultimate Store Destination (Cross-Dock)"
+    priority: conditional
+    condition: "Present only on cross-dock orders"
+    source:
+      segment: N1
+      filter: { N101: MA }
+      element: N104
+      hl_level: "O (Order)"
+    target:
+      segment: N1
+      filter: { N101: MA }
+      element: N104
+    rule: transform
+    transforms:
+      N103:
+        from: "94"
+        to: "92"
+    cross_dock_invoice_rule: >
+      Invoice must be for the MA (ultimate store) destination,
+      NOT the ST (distribution center).
+
+  # ---------------------------------------------------------------------------
+  # HEADING: FOB
+  # ---------------------------------------------------------------------------
+  - id: fob_payment_method
+    name: "FOB Shipment Method"
+    priority: required
+    source:
+      segment: FOB
+      element: FOB01
+      hl_level: "S (Shipment)"
+    target:
+      segment: FOB
+      element: FOB01
+    rule: exact_copy
+
+  # ---------------------------------------------------------------------------
+  # HEADING: Ship Date
+  # ---------------------------------------------------------------------------
+  - id: ship_date
+    name: "Shipped Date"
+    priority: required
+    source:
+      segment: DTM
+      filter: { DTM01: "011" }
+      element: DTM02
+      hl_level: "S (Shipment)"
+    target:
+      segment: DTM
+      filter: { DTM01: "011" }
+      element: DTM02
+    rule: exact_copy
+    note: >
+      The 856 DTM*011 (Shipped) carries the actual ship date.
+      The 810 DTM*011 (Shipped) should reflect the same date.
+
+  # ---------------------------------------------------------------------------
+  # DETAIL: Line Items (Shipped → Invoiced)
+  # ---------------------------------------------------------------------------
+  - id: line_items
+    name: "Item Data"
+    priority: required
+    source:
+      segment: LIN
+      elements: [LIN02, LIN03]
+      hl_level: "I (Item)"
+    target:
+      segment: IT1
+      elements: [IT106, IT107]
+    rule: exact_copy
+    required: true
+
+  - id: shipped_quantity
+    name: "Shipped Quantity → Invoice Quantity"
+    priority: required
+    source:
+      segment: SN1
+      elements: [SN102, SN103]
+      hl_level: "I (Item)"
+    target:
+      segment: IT1
+      elements: [IT102, IT103]
+    rule: preferred
+    note: >
+      Invoice quantity (IT102) should not exceed shipped quantity (SN102).
+      UOM must match between SN103 and IT103.
+
+  # ---------------------------------------------------------------------------
+  # FIELDS NOT CARRIED OVER
+  # ---------------------------------------------------------------------------
+  - id: packaging_not_echoed
+    name: "Packaging Details"
+    rule: not_echoed
+    note: "PKG, TD1, TD3, MAN segments from the 856 are not carried to the 810."
+
+  - id: bsn_not_echoed
+    name: "BSN Shipment ID"
+    rule: not_echoed
+    note: "The BSN02 shipment identification number is not referenced on the 810."

@@ -1,0 +1,716 @@
+# =============================================================================
+# LIFECYCLE STATE MACHINE: Lowe's Order-to-Cash
+# =============================================================================
+# This file defines the document lifecycle as a state machine.
+# It governs:
+#   - Which documents can follow which (valid transitions)
+#   - What data must be captured at each state
+#   - Cross-document validation rules
+#   - Business constraints that span multiple documents
+#
+# All six transaction types are represented:
+#   850 (inbound)  → PO originated
+#   860 (inbound)  → PO changed
+#   855 (outbound) → PO acknowledged / Reverse PO
+#   865 (outbound) → PO change accepted/rejected
+#   856 (outbound) → Shipped
+#   810 (outbound) → Invoiced
+# =============================================================================
+
+lifecycle:
+  name: "Lowe's Stock Order-to-Cash"
+  version: "2.0"
+
+  # ---------------------------------------------------------------------------
+  # THE PO NUMBER IS THE PRIMARY KEY
+  # ---------------------------------------------------------------------------
+  primary_key:
+    name: "purchase_order_number"
+    description: >
+      The PO number is the thread that links all documents in a lifecycle.
+      It originates on the 850 (BEG03) or 855 reverse PO (BAK03) and
+      must appear on every subsequent document.
+    max_digits: 9
+    format: "zero-suppressed"
+    sources:
+      - { transaction: "850", segment: "BEG", element: "BEG03", context: "Lowe's-originated" }
+      - { transaction: "855", segment: "BAK", element: "BAK03", context: "Vendor-initiated reverse PO" }
+    must_appear_on:
+      - { transaction: "860", segment: "BCH", element: "BCH03" }
+      - { transaction: "855", segment: "BAK", element: "BAK03", context: "When acknowledging an 850" }
+      - { transaction: "865", segment: "BCA", element: "BCA03" }
+      - { transaction: "856", segment: "PRF", element: "PRF01" }
+      - { transaction: "810", segment: "BIG", element: "BIG04" }
+    threading_diagram: >
+      850.BEG.BEG03 ══ 860.BCH.BCH03 ══ 855.BAK.BAK03 ══ 865.BCA.BCA03 ══ 856.PRF.PRF01 ══ 810.BIG.BIG04
+
+  # ---------------------------------------------------------------------------
+  # QUANTITY CHAIN
+  # ---------------------------------------------------------------------------
+  quantity_chain:
+    description: "Quantity waterfall across the lifecycle"
+    rule: "ordered (850 PO1) ≥ accepted (855 ACK) ≥ shipped (856 SN1) ≥ invoiced (810 IT1)"
+    enforcement: >
+      Each downstream document must not exceed the quantity from the
+      prior step. Items deleted (ACK01=ID) must not appear downstream.
+
+  # ---------------------------------------------------------------------------
+  # N1 QUALIFIER TRANSFORMATION
+  # ---------------------------------------------------------------------------
+  n1_qualifier_map:
+    description: "N103 Identification Code Qualifier changes across transactions"
+    map:
+      "850": { qualifier: "93", meaning: "Assigned by organization originating the transaction" }
+      "860": { qualifier: "93", meaning: "Assigned by organization originating the transaction" }
+      "855": { qualifier: "94", meaning: "Assigned by org that is ultimate destination" }
+      "856": { qualifier: "94", meaning: "Assigned by org that is ultimate destination" }
+      "810": { qualifier: "92", meaning: "Assigned by Buyer or Buyer's Agent" }
+
+  # ---------------------------------------------------------------------------
+  # STATES
+  # ---------------------------------------------------------------------------
+  states:
+
+    # =========================================================================
+    # STATE: PO Originated (via inbound 850)
+    # =========================================================================
+    po_originated:
+      trigger:
+        document: "850"
+        direction: inbound
+      description: >
+        Lowe's has transmitted a stock purchase order.
+        This is the starting state for the standard order flow.
+
+      captures:
+        - key: po_number
+          from: BEG.BEG03
+          required: true
+        - key: po_type
+          from: BEG.BEG02
+          required: true
+        - key: po_date
+          from: BEG.BEG05
+          required: true
+        - key: currency
+          from: CUR
+          required: true
+          echo_rule: exact_copy
+        - key: fob_method
+          from: FOB.FOB01
+          required: true
+          echo_rule: exact_copy
+        - key: ship_to_store
+          from: N1[ST].N104
+          required: true
+        - key: ultimate_store
+          from: N1[MA].N104
+          required: false
+          condition: "cross-dock orders only"
+        - key: delivery_date
+          from: DTM[002].DTM02
+          required: true
+        - key: ship_date
+          from: DTM[010].DTM02
+          required: false
+        - key: vendor_number
+          from: REF[IA].REF02
+          required: true
+        - key: rp_reference
+          from: REF[WO].REF02
+          required: false
+        - key: truck_load
+          from: REF[AN].REF02
+          required: false
+          condition: "VPXD cross-dock orders only"
+        - key: line_items
+          from: PO1[]
+          required: true
+          fields: [PO101, PO102, PO103, PO104, PO106, PO107, PO108, PO109]
+        - key: item_descriptions
+          from: PID[F][]
+          required: false
+          echo_rule: exact_copy
+        - key: carrier_scac
+          from: TD5.TD503
+          required: false
+
+      valid_transitions:
+        - to: po_acknowledged
+          via: "855"
+          condition: "Vendor sends acknowledgment of the 850"
+        - to: po_changed
+          via: "860"
+          condition: "Lowe's sends a PO change request"
+        - to: shipped
+          via: "856"
+          condition: "Vendor sends advance ship notice"
+        - to: invoiced
+          via: "810"
+          condition: "Vendor invoices directly (no ack/ship step)"
+
+    # =========================================================================
+    # STATE: PO Changed (via inbound 860)
+    # =========================================================================
+    po_changed:
+      trigger:
+        document: "860"
+        direction: inbound
+      description: >
+        Lowe's has sent a PO Change Request modifying or cancelling the
+        original 850. The vendor must respond with an 865.
+
+      captures:
+        - key: change_purpose
+          from: BCH.BCH01
+          required: true
+          note: "01=Cancellation, 05=Replace"
+        - key: po_number
+          from: BCH.BCH03
+          required: true
+          validation: "Must match BEG03 from originating 850"
+        - key: change_date
+          from: BCH.BCH06
+          required: true
+        - key: changed_line_items
+          from: POC[]
+          required: false
+          fields: [POC01, POC02, POC03, POC04, POC05, POC06, POC08, POC09]
+          note: >
+            POC02=NC means no change to that line.
+            POC02=RZ means all values for that line are replaced.
+            When BCH01=05, ALL items must be present (full replacement).
+        - key: changed_delivery_date
+          from: DTM[002].DTM02
+          required: false
+        - key: changed_ship_date
+          from: DTM[010].DTM02
+          required: false
+
+      valid_transitions:
+        - to: po_change_accepted
+          via: "865"
+          condition: "Vendor accepts the PO change (BCA02=AT)"
+        - to: po_change_rejected
+          via: "865"
+          condition: "Vendor rejects the PO change (BCA02=RJ)"
+
+    # =========================================================================
+    # STATE: PO Change Accepted (via outbound 865)
+    # =========================================================================
+    po_change_accepted:
+      trigger:
+        document: "865"
+        direction: outbound
+        condition: "BCA02=AT (Accepted)"
+      description: >
+        Vendor has accepted the Lowe's-initiated PO change. The modified
+        PO data now governs subsequent 856 and 810 generation.
+
+      captures:
+        - key: change_ack_type
+          from: BCA.BCA01
+          required: true
+          note: "Always '11' (Response)"
+        - key: change_status
+          from: BCA.BCA02
+          required: true
+          note: "AT = Accepted"
+        - key: po_number
+          from: BCA.BCA03
+          required: true
+          validation: "Must match BCH03 from the 860"
+
+      valid_transitions:
+        - to: po_changed
+          via: "860"
+          condition: "Lowe's sends another PO change"
+        - to: po_acknowledged
+          via: "855"
+          condition: "Vendor sends acknowledgment after change acceptance"
+        - to: shipped
+          via: "856"
+          condition: "Vendor ships the modified order"
+        - to: invoiced
+          via: "810"
+          condition: "Vendor invoices the modified order"
+
+    # =========================================================================
+    # STATE: PO Change Rejected (via outbound 865)
+    # =========================================================================
+    po_change_rejected:
+      trigger:
+        document: "865"
+        direction: outbound
+        condition: "BCA02=RJ (Rejected)"
+      description: >
+        Vendor has rejected the Lowe's-initiated PO change. The original
+        PO (or last accepted state) remains in effect.
+
+      captures:
+        - key: change_status
+          from: BCA.BCA02
+          required: true
+          note: "RJ = Rejected"
+        - key: po_number
+          from: BCA.BCA03
+          required: true
+
+      valid_transitions:
+        - to: po_changed
+          via: "860"
+          condition: "Lowe's sends a revised PO change"
+        - to: shipped
+          via: "856"
+          condition: "Vendor ships per original/last accepted PO"
+        - to: invoiced
+          via: "810"
+          condition: "Vendor invoices per original/last accepted PO"
+
+    # =========================================================================
+    # STATE: PO Originated via Reverse PO (vendor-initiated 855)
+    # =========================================================================
+    reverse_po_created:
+      trigger:
+        document: "855"
+        direction: outbound
+        condition: "BAK01=00 (Original) and no prior 850 exists for this PO number"
+      description: >
+        Vendor has created a new purchase order via the 855 reverse PO
+        process (VMI program or store-authorized direct order).
+
+      captures:
+        - key: po_number
+          from: BAK.BAK03
+          required: true
+          validation: "Must be a reserved PO number from LowesLink"
+        - key: ack_type
+          from: BAK.BAK02
+          required: true
+        - key: po_date
+          from: BAK.BAK04
+          required: true
+        - key: rp_reference
+          from: REF[WO].REF02
+          required: true
+          validation: "Must be correct 5-digit RP ref from Merchandising"
+        - key: order_contact
+          from: PER[OC].PER02
+          required: true
+        - key: fob_method
+          from: FOB.FOB01
+          required: true
+        - key: ship_to_store
+          from: N1[ST].N104
+          required: true
+        - key: ultimate_store
+          from: N1[MA].N104
+          required: false
+          condition: "cross-dock only"
+        - key: delivery_date
+          from: DTM[067].DTM02
+          required: true
+        - key: ship_date
+          from: DTM[068].DTM02
+          required: true
+        - key: line_items
+          from: PO1[]
+          required: true
+        - key: ack_items
+          from: ACK[]
+          required: true
+
+      valid_transitions:
+        - to: reverse_po_modified
+          via: "855"
+          condition: "BAK01=05 (Replace) — pre-approved vendors only"
+        - to: reverse_po_cancelled
+          via: "855"
+          condition: "BAK01=01 (Cancel) — pre-approved vendors only"
+        - to: shipped
+          via: "856"
+          condition: "Vendor ships the reverse PO order"
+        - to: invoiced
+          via: "810"
+          condition: "Vendor invoices the reverse PO"
+
+    # =========================================================================
+    # STATE: PO Acknowledged (855 in response to an 850)
+    # =========================================================================
+    po_acknowledged:
+      trigger:
+        document: "855"
+        direction: outbound
+        condition: "855 references an existing 850 PO number"
+      description: >
+        Vendor has acknowledged, changed, or rejected a Lowe's-originated 850.
+
+      captures:
+        - key: ack_purpose
+          from: BAK.BAK01
+          required: true
+          note: "00=Original ack, 05=Replace, 01=Cancel, 06=Confirm"
+        - key: ack_type
+          from: BAK.BAK02
+          required: true
+          note: "AC=With change, AD=No change, RJ=Rejected"
+        - key: accepted_items
+          from: ACK[]
+          required: true
+          fields: [ACK01, ACK02, ACK03, ACK07, ACK08]
+          note: >
+            ACK quantities determine what gets shipped and invoiced:
+            IA → full qty, IQ → reduced qty, ID → item removed
+
+      valid_transitions:
+        - to: po_acknowledged
+          via: "855"
+          condition: "Another change before voucher/invoice/receipt/cancel"
+        - to: po_changed
+          via: "860"
+          condition: "Lowe's sends a PO change request"
+        - to: shipped
+          via: "856"
+          condition: "Vendor ships accepted items"
+        - to: invoiced
+          via: "810"
+          condition: "Vendor invoices accepted items"
+
+    # =========================================================================
+    # STATE: Reverse PO Modified
+    # =========================================================================
+    reverse_po_modified:
+      trigger:
+        document: "855"
+        direction: outbound
+        condition: "BAK01=05 (Replace)"
+      description: >
+        Vendor has sent a replacement 855 for a previously submitted reverse PO.
+        The replacement must include ALL items (full replacement, not delta).
+
+      constraints:
+        - "PO must not yet be vouchered, invoiced, cancelled, or received"
+        - "Only pre-approved vendors"
+        - "All items must be included (full replacement)"
+      prohibited_changes:
+        - "Store Number (N1 ST)"
+        - "Purchase Order Number (BAK03)"
+        - "Item Price"
+        - "Reference Number (REF WO)"
+        - "Truck Load Number (REF AN)"
+
+      valid_transitions:
+        - to: reverse_po_modified
+          via: "855"
+          condition: "Another change before voucher/invoice/receipt/cancel"
+        - to: reverse_po_cancelled
+          via: "855"
+          condition: "BAK01=01 (Cancel)"
+        - to: shipped
+          via: "856"
+          condition: "Vendor ships the modified reverse PO"
+        - to: invoiced
+          via: "810"
+
+    # =========================================================================
+    # STATE: Reverse PO Cancelled
+    # =========================================================================
+    reverse_po_cancelled:
+      trigger:
+        document: "855"
+        direction: outbound
+        condition: "BAK01=01 (Cancel)"
+      description: "Vendor has voided the reverse PO."
+      terminal: true
+      note: >
+        If vendor sends Original → Cancel → re-Original same day,
+        Lowe's processes the Cancel and the PO is NOT re-posted.
+
+    # =========================================================================
+    # STATE: Shipped (856)
+    # =========================================================================
+    shipped:
+      trigger:
+        document: "856"
+        direction: outbound
+      description: >
+        Vendor has submitted an Advance Ship Notice for the purchase order.
+        One ASN per PO. ASN should be sent before or when the truck is sealed.
+
+      captures:
+        - key: shipment_id
+          from: BSN.BSN02
+          required: true
+          validation: "Must be unique for 2 years"
+        - key: asn_purpose
+          from: BSN.BSN01
+          required: true
+          note: "00=Original, 05=Replacement"
+        - key: ship_date
+          from: DTM[011].DTM02
+          required: true
+          hl_level: "S (Shipment)"
+        - key: estimated_arrival
+          from: DTM[067].DTM02
+          required: true
+          hl_level: "O (Order)"
+        - key: carrier_scac
+          from: TD5.TD503
+          required: false
+          hl_level: "S (Shipment)"
+        - key: transportation_method
+          from: TD5.TD504
+          required: false
+        - key: fob_method
+          from: FOB.FOB01
+          required: true
+          hl_level: "S (Shipment)"
+        - key: ship_from
+          from: N1[SF].N102
+          required: true
+          hl_level: "S (Shipment)"
+        - key: ship_to_store
+          from: N1[ST].N104
+          required: true
+          hl_level: "O (Order)"
+        - key: ultimate_store
+          from: N1[MA].N104
+          required: false
+          hl_level: "O (Order)"
+          condition: "cross-dock only"
+        - key: vendor_number
+          from: REF[IA].REF02
+          required: true
+          hl_level: "O (Order)"
+        - key: po_number
+          from: PRF.PRF01
+          required: true
+          hl_level: "O (Order)"
+        - key: packaging_method
+          from: PKG.PKG06
+          required: true
+          hl_level: "O (Order)"
+        - key: shipped_items
+          from: LIN[] + SN1[]
+          required: true
+          hl_level: "I (Item)"
+          fields: [LIN02, LIN03, SN102, SN103]
+
+      constraints:
+        - "One PO per ASN"
+        - "Replacement ASN (BSN01=05) must use same BSN02 as original"
+        - "Replacement must be received prior to shipment arrival"
+        - "Same trading partner EDI ID on Original and Replacement ASNs"
+
+      injects_from_captured:
+        - target: PRF.PRF01
+          from_capture: po_number
+          rule: exact_copy
+          required: true
+
+        - target: FOB.FOB01
+          from_capture: fob_method
+          rule: exact_copy
+          required: true
+
+        - target: N1[ST].N104
+          from_capture: ship_to_store
+          rule: exact_copy
+          transform: { N103: { to: "94" } }
+          required: true
+
+        - target: N1[MA].N104
+          from_capture: ultimate_store
+          rule: exact_copy
+          transform: { N103: { to: "94" } }
+          condition: "if cross-dock"
+
+        - target: REF[IA].REF02
+          from_capture: vendor_number
+          rule: exact_copy
+          required: true
+
+        - target: LIN[] + SN1[]
+          from_capture: line_items
+          rule: preferred_copy
+          note: >
+            If 855 ACK exists, ship only acknowledged quantities.
+            Items with ACK01=ID should NOT appear in the 856.
+
+      valid_transitions:
+        - to: shipped
+          via: "856"
+          condition: "Replacement ASN (BSN01=05) with same BSN02"
+        - to: invoiced
+          via: "810"
+          condition: "Vendor invoices shipped items"
+
+    # =========================================================================
+    # STATE: Invoiced (810)
+    # =========================================================================
+    invoiced:
+      trigger:
+        document: "810"
+        direction: outbound
+      description: >
+        Vendor has submitted an invoice for the purchase order.
+        This is the primary terminal state for successful orders.
+
+      injects_from_captured:
+        - target: BIG.BIG04
+          from_capture: po_number
+          rule: exact_copy
+          required: true
+
+        - target: CUR
+          from_capture: currency
+          rule: exact_copy
+          required: true
+
+        - target: FOB.FOB01
+          from_capture: fob_method
+          rule: exact_copy
+          required: true
+
+        - target: N1[ST].N104
+          from_capture: ship_to_store
+          rule: exact_copy
+          transform: { N103: { to: "92" } }
+          required: true
+
+        - target: N1[MA].N104
+          from_capture: ultimate_store
+          rule: exact_copy
+          transform: { N103: { to: "92" } }
+          condition: "if cross-dock"
+
+        - target: CAD.CAD04
+          from_capture: carrier_scac
+          rule: exact_copy
+          condition: "if SCAC available"
+
+        - target: IT1[]
+          from_capture: line_items
+          rule: preferred_copy
+          note: >
+            If 855 ACK exists, use acknowledged quantities.
+            If 856 exists, invoice qty should not exceed shipped qty.
+            Items with ACK01=ID should NOT appear on the invoice.
+
+      validations:
+        - name: "Invoice amount integrity"
+          rule: "TDS01 == sum(IT1 qty * unit_price) + sum(SAC charges) - sum(SAC allowances)"
+        - name: "Line item count"
+          rule: "CTT01 == count(IT1 line items)"
+        - name: "Freight SAC required for prepaid charged"
+          rule: "if FOB01=PC then SAC with D240 must exist"
+        - name: "Freight allowance for collect credited"
+          rule: "if FOB01=CF then SAC with freight allowance must exist"
+        - name: "Freight not a line item"
+          rule: "Freight charges must be in SAC, never as an IT1 line"
+        - name: "Cross-dock invoice target"
+          rule: "Invoice must be for MA (ultimate store), not ST (RDC)"
+        - name: "One invoice per store destination"
+          rule: "One 810 per ultimate store destination PO"
+        - name: "SOS SAC restriction"
+          condition: "if SOS purchase order"
+          rule: "Only SAC codes C680, G090, H850 are permitted"
+        - name: "Invoice qty <= shipped qty"
+          condition: "when 856 exists for this PO"
+          rule: "810.IT1.IT102 <= 856.SN1.SN102 for each matching line item"
+
+      terminal: true
+
+  # ---------------------------------------------------------------------------
+  # CROSS-DOCUMENT VALIDATION RULES
+  # ---------------------------------------------------------------------------
+  global_validations:
+
+    - name: "PO number consistency"
+      description: "The PO number must be identical across all documents in the lifecycle"
+      rule: >
+        850.BEG.BEG03 == 860.BCH.BCH03 == 855.BAK.BAK03 == 865.BCA.BCA03 == 856.PRF.PRF01 == 810.BIG.BIG04
+        (for all documents referencing the same order)
+
+    - name: "Currency consistency"
+      description: "Currency must not change across the lifecycle"
+      rule: "850.CUR.CUR02 == 860.CUR.CUR02 == 810.CUR.CUR02"
+
+    - name: "Store number consistency"
+      description: "The ultimate store destination must not change"
+      rule: >
+        850.N1[MA].N104 == 860.N1[MA].N104 == 855.N1[MA].N104 == 856.N1[MA].N104 == 810.N1[MA].N104
+        (when MA is present; otherwise ST must be consistent)
+
+    - name: "Quantity waterfall"
+      description: "Quantities must decrease or stay equal through the lifecycle"
+      rule: "ordered (850/860 PO1/POC) >= accepted (855 ACK) >= shipped (856 SN1) >= invoiced (810 IT1)"
+
+    - name: "No invoice after cancellation"
+      description: "Cannot submit an 810 for a cancelled PO"
+      rule: "If 855.BAK01=01 was processed, no 810 is permitted"
+
+    - name: "No ship after cancellation"
+      description: "Cannot submit an 856 for a cancelled PO"
+      rule: "If 855.BAK01=01 was processed, no 856 is permitted"
+
+    - name: "860 must reference existing 850"
+      description: "PO Change Request must reference a valid, active PO"
+      rule: "860.BCH.BCH03 must match an existing 850.BEG.BEG03"
+
+    - name: "865 must reference existing 860"
+      description: "PO Change Ack must reference a valid PO change"
+      rule: "865.BCA.BCA03 must match an existing 860.BCH.BCH03"
+
+    - name: "856 one PO per ASN"
+      description: "Each ASN can contain only one purchase order"
+      rule: "One PRF segment per ST transaction loop"
+
+    - name: "856 replacement consistency"
+      description: "Replacement ASN must use same shipment ID as original"
+      rule: "If BSN01=05, BSN02 must match the original ASN's BSN02"
+
+    - name: "855 processing order awareness"
+      description: "Understand Lowe's 855 processing sequence"
+      rule: >
+        Lowe's processes 855s at 6:30 PM ET Mon-Sat (no Sunday).
+        Originals processed first, then changes/voids.
+        Original + Change same day → PO posted with Change data.
+        Original + Cancel + re-Original same day → PO cancelled, NOT re-posted.
+
+  # ---------------------------------------------------------------------------
+  # TRANSITION DIAGRAM (for visualization/documentation)
+  # ---------------------------------------------------------------------------
+  transition_diagram: |
+    ┌─────────────────────────────────────────────────────────────────────────────┐
+    │                       LOWE'S ORDER LIFECYCLE v2.0                          │
+    │                                                                             │
+    │  INBOUND                              OUTBOUND                              │
+    │  (Lowe's → Vendor)                    (Vendor → Lowe's)                     │
+    │                                                                             │
+    │  ┌──────────┐                         ┌────────────────┐                    │
+    │  │  850 PO   │────────────────────────▶│ 855 PO Ack     │                    │
+    │  │ BEG03=PO# │                         │ BAK03=PO#      │                    │
+    │  └─────┬────┘                         └───────┬────────┘                    │
+    │        │                                       │                             │
+    │        │  ┌──────────┐  ┌──────────┐          │                             │
+    │        ├─▶│ 860 Chg  │─▶│ 865 Ack  │          │                             │
+    │        │  │ BCH03=PO#│  │ BCA03=PO#│          │                             │
+    │        │  └──────────┘  └──────────┘          │                             │
+    │        │                                       │                             │
+    │        │                              ┌───────▼────────┐                    │
+    │        ├─────────────────────────────▶│ 856 ASN        │                    │
+    │        │                              │ PRF01=PO#      │                    │
+    │        │                              └───────┬────────┘                    │
+    │        │                                       │                             │
+    │        │                              ┌───────▼────────┐                    │
+    │        └─────────────────────────────▶│ 810 Invoice    │                    │
+    │                                       │ BIG04=PO#      │                    │
+    │                                       └────────────────┘                    │
+    │                                                                             │
+    │  ┌──────────┐         (reverse PO flow)                                    │
+    │  │855 Rev PO│────────────────────────▶ 856 ASN ──────▶ 810 Invoice         │
+    │  │BAK01=00  │                                                              │
+    │  │(no 850)  │                                                              │
+    │  └──────────┘                                                              │
+    └─────────────────────────────────────────────────────────────────────────────┘

@@ -1,0 +1,160 @@
+# =============================================================================
+# LOWE'S EDI MASTER ORCHESTRATOR
+# =============================================================================
+# This is the top-level configuration that defines the complete EDI
+# relationship with Lowe's Companies, Inc. It references individual
+# transaction schemas, shared definitions, field-level mappings, and
+# the lifecycle state machine that governs how documents relate.
+#
+# Architecture:
+#   lowes_master.yaml          ← you are here (orchestrator)
+#   ├── shared/                ← reusable envelope, codelists, segments
+#   ├── transactions/          ← per-document schemas (850, 855, 810, 856, 860)
+#   ├── mappings/              ← field-level turnaround/echo rules between docs
+#   └── lifecycle/             ← state machine + validation constraints
+# =============================================================================
+
+partner:
+  name: "Lowe's Companies, Inc."
+  qualifier: "01"                         # ISA ID Qualifier (DUNS)
+  receiver_id: "006097142"                # ISA08 / GS03 for all transactions
+  x12_version: "004010"
+  segment_terminator: '\'
+  element_separator: "*"
+  sub_element_separator: ">"
+
+# -----------------------------------------------------------------------------
+# TRANSACTION REGISTRY
+# -----------------------------------------------------------------------------
+# Each transaction is registered here with its direction, functional group,
+# and a $ref pointer to the detailed schema file.
+# Adding a new document type (e.g., 997 FA) is as simple as adding an entry
+# here and creating the corresponding transaction YAML.
+# -----------------------------------------------------------------------------
+transactions:
+
+  850_stock_purchase_order:
+    ref: transactions/850_stock_po.yaml
+    transaction_set: "850"
+    functional_group: "PO"
+    direction: inbound                    # Lowe's → Vendor
+    description: >
+      Stock purchase order. One 850 per PO. Changes are sent via 860
+      PO Change Request.
+    spec_version: "4010"
+    spec_modified: "2023-04-21"
+
+  860_po_change_request:
+    ref: transactions/860_po_change.yaml
+    transaction_set: "860"
+    functional_group: "PC"
+    direction: inbound                    # Lowe's → Vendor
+    description: >
+      Purchase Order Change Request (Buyer Initiated). Used by Lowe's
+      to change or cancel a previously submitted 850. Uses POC segments
+      instead of PO1. Vendor responds with 865.
+    spec_version: "4010"
+    spec_modified: "2026-02-17"
+
+  855_po_acknowledgment:
+    ref: transactions/855_po_ack.yaml
+    transaction_set: "855"
+    functional_group: "PR"
+    direction: outbound                   # Vendor → Lowe's
+    description: >
+      Purchase Order Acknowledgment / Reverse Purchase Order.
+      Used for VMI vendor-initiated POs, or to acknowledge/change/cancel
+      an existing Lowe's-originated PO.
+    spec_version: "4010"
+    spec_modified: "2025-10-23"
+
+  865_po_change_ack:
+    ref: transactions/865_po_change_ack.yaml
+    transaction_set: "865"
+    functional_group: "PC"
+    direction: outbound                   # Vendor → Lowe's
+    description: >
+      PO Change Acknowledgment (Seller Initiated). Response to Lowe's
+      860. Lightweight: BCA segment only — accept (AT) or reject (RJ).
+      Reuses functional group PC and ST01=860 in envelope.
+    spec_version: "4010"
+    spec_modified: "2025-10-23"
+
+  856_advance_ship_notice:
+    ref: transactions/856_asn.yaml
+    transaction_set: "856"
+    functional_group: "SH"
+    direction: outbound                   # Vendor → Lowe's
+    description: >
+      Advance Ship Notice / Manifest. Uses hierarchical HL structure
+      (S/O/T/I). One PO per ASN. Two formats: Detail ASN (with GS1-128)
+      and Summary ASN (without GS1-128).
+    spec_version: "4010"
+    spec_modified: "2025-12-08"
+
+  810_invoice:
+    ref: transactions/810_invoice.yaml
+    transaction_set: "810"
+    functional_group: "IN"
+    direction: outbound                   # Vendor → Lowe's
+    description: >
+      Invoice for stock and SOS purchase orders. One invoice per
+      ultimate store destination (not per intermediate RDC).
+    spec_version: "4010"
+    spec_modified: "2018-09-28"
+
+  # --- FUTURE DOCUMENTS (uncomment when specs are added) ---
+  # 997_functional_acknowledgment:
+  #   ref: transactions/997_fa.yaml
+  #   transaction_set: "997"
+  #   functional_group: "FA"
+  #   direction: both
+
+# -----------------------------------------------------------------------------
+# SHARED SCHEMA REFERENCES
+# -----------------------------------------------------------------------------
+shared:
+  envelope: shared/envelope.yaml          # ISA/GS/GE/IEA definitions
+  codelists: shared/codelists.yaml        # Shared code values across documents
+  common_segments: shared/common_segments.yaml  # N1, N3, N4, FOB, DTM, etc.
+
+# -----------------------------------------------------------------------------
+# FIELD-LEVEL MAPPING REFERENCES
+# -----------------------------------------------------------------------------
+# Each mapping file defines the turnaround / echo rules between two documents.
+# These are the "contracts" that ensure data flows correctly across the lifecycle.
+# -----------------------------------------------------------------------------
+mappings:
+  850_to_810:
+    ref: mappings/850_to_810_turnaround.yaml
+    description: "PO fields that must echo back on the invoice"
+
+  850_to_855:
+    ref: mappings/850_to_855_turnaround.yaml
+    description: "PO fields that must appear on the acknowledgment"
+
+  850_to_856:
+    ref: mappings/850_to_856_turnaround.yaml
+    description: "PO fields that must appear on the advance ship notice"
+
+  855_to_810:
+    ref: mappings/855_to_810_turnaround.yaml
+    description: "Reverse PO fields that must carry to the invoice"
+
+  856_to_810:
+    ref: mappings/856_to_810_turnaround.yaml
+    description: "ASN shipped data that must carry to the invoice"
+
+  860_to_865:
+    ref: mappings/860_to_865_turnaround.yaml
+    description: "PO Change fields that must appear on the change acknowledgment"
+
+# -----------------------------------------------------------------------------
+# LIFECYCLE / STATE MACHINE
+# -----------------------------------------------------------------------------
+lifecycle:
+  ref: lifecycle/order_to_cash.yaml
+  description: >
+    Defines the state machine for the full order-to-cash cycle.
+    Governs which documents can follow which, what data must be
+    captured at each state, and cross-document validation rules.

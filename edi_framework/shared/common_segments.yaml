@@ -1,0 +1,146 @@
+# =============================================================================
+# COMMON SEGMENTS
+# =============================================================================
+# Segment definitions shared across 850, 855, and 810.
+# Individual transactions reference these and add overrides/restrictions.
+# =============================================================================
+
+segments:
+
+  ST:
+    name: "Transaction Set Header"
+    usage: mandatory
+    max_use: 1
+    elements:
+      ST01:
+        name: "Transaction Set Identifier Code"
+        type: ID
+        min_max: "3/3"
+        usage: mandatory
+        note: "Overridden per transaction: 850, 855, 810"
+      ST02:
+        name: "Transaction Set Control Number"
+        type: AN
+        min_max: "4/9"
+        usage: mandatory
+        cross_ref: "Must match SE02"
+
+  N1:
+    name: "Name"
+    usage: mandatory
+    max_use: 1
+    loop: N1
+    max_loop: 200
+    elements:
+      N101:
+        name: "Entity Identifier Code"
+        type: ID
+        min_max: "2/3"
+        usage: mandatory
+        codelist_ref: entity_identifier
+      N102:
+        name: "Name"
+        type: AN
+        min_max: "1/60"
+        usage: conditional
+      N103:
+        name: "Identification Code Qualifier"
+        type: ID
+        min_max: "1/2"
+        usage: mandatory
+        codelist_ref: identification_code_qualifier
+        note: "Qualifier differs by transaction: 93 on 850, 92 on 810, 94 on 855"
+      N104:
+        name: "Identification Code"
+        type: AN
+        min_max: "2/80"
+        usage: mandatory
+        note: "Lowe's store number (up to 5 digits)"
+
+  N3:
+    name: "Address Information"
+    usage: optional
+    max_use: 2
+    loop: N1
+    elements:
+      N301:
+        name: "Address Information"
+        type: AN
+        min_max: "1/55"
+        usage: mandatory
+      N302:
+        name: "Address Information (line 2)"
+        type: AN
+        min_max: "1/55"
+        usage: optional
+
+  N4:
+    name: "Geographic Location"
+    usage: optional
+    max_use: 1
+    loop: N1
+    elements:
+      N401:
+        name: "City Name"
+        type: AN
+        min_max: "2/30"
+        usage: mandatory
+      N402:
+        name: "State or Province Code"
+        type: ID
+        min_max: "2/2"
+        usage: mandatory
+      N403:
+        name: "Postal Code"
+        type: ID
+        min_max: "3/15"
+        usage: mandatory
+        note: "Canadian format: ANA NAN (upper case, one space)"
+      N404:
+        name: "Country Code"
+        type: ID
+        min_max: "2/3"
+        usage: mandatory
+        codelist_ref: country_code
+
+  FOB:
+    name: "F.O.B. Related Instructions"
+    usage: mandatory
+    max_use: 1
+    elements:
+      FOB01:
+        name: "Shipment Method of Payment"
+        type: ID
+        min_max: "2/2"
+        usage: mandatory
+        codelist_ref: shipment_method_of_payment
+
+  CTT:
+    name: "Transaction Totals"
+    usage: mandatory
+    max_use: 1
+    elements:
+      CTT01:
+        name: "Number of Line Items"
+        type: N0
+        min_max: "1/6"
+        usage: mandatory
+        computed: "count of detail line item loops"
+
+  SE:
+    name: "Transaction Set Trailer"
+    usage: mandatory
+    max_use: 1
+    elements:
+      SE01:
+        name: "Number of Included Segments"
+        type: N0
+        min_max: "1/10"
+        usage: mandatory
+        computed: "count of segments including ST and SE"
+      SE02:
+        name: "Transaction Set Control Number"
+        type: AN
+        min_max: "4/9"
+        usage: mandatory
+        cross_ref: "Must match ST02"

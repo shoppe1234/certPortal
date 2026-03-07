@@ -1,0 +1,936 @@
+# =============================================================================
+# 856 ADVANCE SHIP NOTICE / MANIFEST - Vendor → Lowe's (Outbound)
+# =============================================================================
+# Version: 004010 | Modified: 2025-12-08
+# Functional Group: SH
+# Direction: Outbound (Vendor sends to Lowe's)
+#
+# The 856 ASN is a key EDI document that allows Lowe's to plan for the
+# receipt of shipments. It uses a hierarchical (HL) loop structure:
+#   S (Shipment) → O (Order) → T (Tare/Pallet) → I (Item)
+#
+# Critical constraints:
+#   - ONE purchase order per ASN (per ST transaction loop)
+#   - PRF01 carries the PO number linking back to the 850
+#   - BSN02 (Shipment ID) must be unique for 2 years
+#   - N1 at order level uses qualifier 94 (same as 855)
+#   - Replacement ASNs (BSN01=05) must reuse the original BSN02
+#
+# Two ASN formats:
+#   1. Detail ASN — GS1-128 bar code labels at pallet level (S/O/T/I)
+#   2. Summary ASN — no GS1-128 labels (S/O/I, no Tare level)
+# =============================================================================
+
+transaction:
+  id: "856"
+  name: "Ship Notice/Manifest"
+  functional_group: "SH"
+  direction: outbound
+  version: "004010"
+
+  shared_refs:
+    envelope: shared/envelope.yaml
+    common: shared/common_segments.yaml
+    codelists: shared/codelists.yaml
+
+  # ---------------------------------------------------------------------------
+  # ENVELOPE OVERRIDES
+  # ---------------------------------------------------------------------------
+  envelope_overrides:
+    ISA:
+      ISA07: { fixed_value: "01" }          # Lowe's qualifier is DUNS
+      ISA08: { fixed_value: "006097142" }   # Lowe's receiver ID
+      note: "Same trading partner EDI ID required on Original and Replacement ASNs"
+    GS:
+      GS01: { fixed_value: "SH" }
+      GS03: { fixed_value: "006097142" }
+      GS06:
+        note: "Unique control numbers; increment by one per 856. Do not repeat."
+    ST:
+      ST01: { fixed_value: "856" }
+      ST02:
+        note: "Unique control numbers; increment by one per 856. Do not repeat."
+
+  # ---------------------------------------------------------------------------
+  # PROCESSING RULES
+  # ---------------------------------------------------------------------------
+  processing:
+    one_po_per_asn: >
+      Each ASN can contain only one purchase order, even when multiple orders
+      are delivered to one location. Multiple ASNs can be transmitted within one
+      interchange, but only one ASN per ST Transaction Loop.
+    one_document_type_per_interchange: >
+      Only one document type should be sent per interchange. If more than one
+      type is included (e.g., invoices and ASNs), Lowe's will process the data
+      twice. Send only ASNs within an ASN interchange.
+    timing: >
+      ASN should be sent as soon as the truck is sealed or before shipment
+      leaves the vendor's facility. Preferred arrival: at least one day prior
+      to delivery.
+    replacement_rules: >
+      Lowe's prefers one Original ASN that is accurate and timely. If a change
+      is needed, send a Replacement ASN (BSN01=05) with the same Shipment ID
+      (BSN02) as the Original. Must be received prior to shipment arrival.
+      After Original is transmitted, ALL subsequent ASNs must be Replacement
+      regardless of whether the Original was rejected.
+    error_handling: >
+      Lowe's returns an 824 Application Advice (version 004060) for 856 ASN
+      data errors. Acknowledge the 824 with a 997 within 72 hours. If the ASN
+      is rejected (OTI01=TR), send a Replacement ASN within 24 hours.
+    functional_ack: >
+      Lowe's returns a 997 Functional Acknowledgment within 30 minutes of
+      receiving the 856. No 997 received = Lowe's did not receive the 856.
+
+  # ---------------------------------------------------------------------------
+  # ORDER TYPES REQUIRING ASN
+  # ---------------------------------------------------------------------------
+  order_types:
+    required:
+      - "Stock orders"
+      - "Consignment orders"
+      - "Vendor prepared cross-dock orders (excl. FDC cross-dock)"
+      - "Free goods"
+      - "Promotional orders"
+      - "Display orders"
+      - "Prepaid and collect shipments"
+    not_required:
+      - "Ocean Import (exchanged with GXS)"
+      - "SOS (Special Order Sales) — optional; will be processed if sent"
+      - "Live Plants"
+      - "Reverse Purchase Orders (855-originated)"
+      - "Repair product purchase orders"
+      - "Sample product purchase orders — optional"
+
+  # ---------------------------------------------------------------------------
+  # ASN FORMAT TYPES
+  # ---------------------------------------------------------------------------
+  asn_formats:
+    detail:
+      description: "Detail ASN with GS1-128 bar code labels at pallet level"
+      bsn05: "0001"
+      hierarchy: "Shipment → Order → Tare → Item (S/O/T/I)"
+      gs1_128_required: true
+      rules:
+        - "Each pallet requires a unique GS1-128 label"
+        - "Master cartons or individual items on pallets do NOT require labels"
+        - "Applies to single-SKU and mixed-SKU pallets"
+        - "Multiple POs on one pallet: each sub-pallet (quarter pallet) gets own label and own ASN"
+        - "Slip sheet units: each layer gets own GS1-128 label"
+    summary:
+      description: "Summary ASN without GS1-128 bar code labeling"
+      bsn05: "0004"
+      hierarchy: "Shipment → Order → Item (S/O/I, no Tare level)"
+      gs1_128_required: false
+      rules:
+        - "Used for carton-only shipments"
+        - "Used when shipping one PO with both pallets AND non-palletized floor-loaded cartons"
+
+  # ---------------------------------------------------------------------------
+  # HEADING SEGMENTS
+  # ---------------------------------------------------------------------------
+  heading:
+
+    BSN:
+      name: "Beginning Segment for Ship Notice"
+      position: 200
+      usage: mandatory
+      max_use: 1
+      elements:
+        BSN01:
+          name: "Transaction Set Purpose Code"
+          type: ID
+          min_max: "2/2"
+          usage: mandatory
+          allowed_codes: ["00", "05"]
+          business_rules:
+            - code: "00"
+              meaning: "Original — first ASN for this shipment"
+            - code: "05"
+              meaning: "Replace — must use same BSN02 as original"
+        BSN02:
+          name: "Shipment Identification"
+          type: AN
+          min_max: "2/30"
+          usage: mandatory
+          constraints:
+            uniqueness: "Must be unique for 2 years"
+            no_zero_fill: true
+          business_rules:
+            - context: "Lowe's Owned Shipments"
+              rule: "Shipper's unique control number, NOT the bill of lading number. Max 30 alphanumeric."
+            - context: "Consignment Shipments"
+              rule: "PO number assigned by vendor on the paper manifest (packing list/BOL). Max 20 alphanumeric."
+            - context: "Replacement ASNs"
+              rule: "MUST be the same value as sent in the Original ASN (BSN01=00)."
+        BSN03:
+          name: "Date"
+          type: DT
+          min_max: "8/8"
+          usage: mandatory
+          format: "CCYYMMDD"
+          note: "Date the ASN was created"
+        BSN04:
+          name: "Time"
+          type: TM
+          min_max: "4/8"
+          usage: mandatory
+          note: "Time the ASN was created (HHMM or HHMMSS)"
+        BSN05:
+          name: "Hierarchical Structure Code"
+          type: ID
+          min_max: "4/4"
+          usage: optional
+          allowed_codes: ["0001", "0004"]
+          business_rules:
+            - code: "0001"
+              meaning: "Shipment, Order, Packaging, Item — Detail ASN with GS1-128"
+            - code: "0004"
+              meaning: "Shipment, Order, Item — Summary ASN without GS1-128"
+
+  # ---------------------------------------------------------------------------
+  # DETAIL: HIERARCHICAL LOOPS
+  # ---------------------------------------------------------------------------
+  # The 856 uses HL loops instead of traditional heading/detail/summary.
+  # Four hierarchical levels: S (Shipment), O (Order), T (Tare), I (Item)
+  # ---------------------------------------------------------------------------
+  detail:
+
+    # =========================================================================
+    # HL LEVEL: SHIPMENT (HL03=S)
+    # =========================================================================
+    hl_shipment:
+      name: "Shipment Level"
+      hl_code: "S"
+      hl_parent: null
+      description: >
+        Top-level loop. Contains carrier details, ship date, FOB, and
+        ship-from address. Required on every ASN.
+      segments:
+
+        HL:
+          name: "Hierarchical Level"
+          position: 100
+          usage: mandatory
+          max_use: 1
+          elements:
+            HL01:
+              name: "Hierarchical ID Number"
+              type: AN
+              min_max: "1/12"
+              usage: mandatory
+              note: "Lowe's allows only numeric values. Typically '1' for shipment level."
+            HL02:
+              name: "Hierarchical Parent ID Number"
+              type: AN
+              min_max: "1/12"
+              usage: not_used
+              note: "Leave blank for shipment level"
+            HL03:
+              name: "Hierarchical Level Code"
+              type: ID
+              min_max: "1/2"
+              usage: mandatory
+              fixed_value: "S"
+
+        TD1:
+          name: "Carrier Details (Quantity and Weight)"
+          position: 1100
+          usage: optional
+          max_use: 20
+          note: "Only at shipment level (HL03=S). Represents one specific purchase order."
+          elements:
+            TD101:
+              name: "Packaging Code"
+              type: AN
+              min_max: "3/5"
+              usage: optional
+              allowed_codes: [CTN, PLT, SLP]
+              business_rules:
+                - code: CTN
+                  meaning: "Carton"
+                - code: PLT
+                  meaning: "Pallet — TD102 count should match number of Tare HL loops in Detail ASN"
+                - code: SLP
+                  meaning: "Slip Sheet — use only when entire order is shipped with slip sheets"
+            TD102:
+              name: "Lading Quantity"
+              type: N0
+              min_max: "1/7"
+              usage: conditional
+              condition: "Required if TD101 is present"
+            TD107:
+              name: "Weight"
+              type: R
+              min_max: "1/10"
+              usage: optional
+            TD108:
+              name: "Unit or Basis for Measurement Code"
+              type: ID
+              min_max: "2/2"
+              usage: conditional
+              condition: "Required if TD107 is present"
+              allowed_codes: [LB]
+            TD109:
+              name: "Volume"
+              type: R
+              min_max: "1/8"
+              usage: optional
+            TD110:
+              name: "Unit or Basis for Measurement Code"
+              type: ID
+              min_max: "2/2"
+              usage: conditional
+              condition: "Required if TD109 is present"
+              allowed_codes: [CF]
+
+        TD5:
+          name: "Carrier Details (Routing Sequence/Transit Time)"
+          position: 1200
+          usage: mandatory
+          max_use: 12
+          note: "Only at shipment level (HL03=S)."
+          elements:
+            TD502:
+              name: "Identification Code Qualifier"
+              type: ID
+              min_max: "1/2"
+              usage: conditional
+              allowed_codes: ["2", "91"]
+              business_rules:
+                - code: "2"
+                  meaning: "Standard Carrier Alpha Code (SCAC)"
+                - code: "91"
+                  meaning: "Assigned by Seller — use only if SCAC unavailable"
+              note: "At least one of TD502 or TD504 is required."
+            TD503:
+              name: "Identification Code"
+              type: AN
+              min_max: "2/80"
+              usage: conditional
+              condition: "Required if TD502 is present"
+              note: "SCAC code, or carrier's free-form name if TD502=91"
+              turnaround:
+                echoes_to:
+                  - { transaction: "810", segment: "CAD", element: "CAD04" }
+            TD504:
+              name: "Transportation Method/Type Code"
+              type: ID
+              min_max: "1/2"
+              usage: conditional
+              allowed_codes: [M, R, U, LT]
+              business_rules:
+                - code: M
+                  meaning: "Motor (Common Carrier)"
+                - code: R
+                  meaning: "Rail — requires TD303 rail car equipment number"
+                - code: U
+                  meaning: "Private Parcel Service"
+                - code: LT
+                  meaning: "Less Than Trailer Load (LTL)"
+              note: "At least one of TD502 or TD504 is required. TD501 is not used by Lowe's."
+
+        TD3:
+          name: "Carrier Details (Equipment)"
+          position: 1300
+          usage: optional
+          max_use: 1
+          loop: TD3
+          max_loop: 12
+          note: "Only at shipment level (HL03=S). Required for consignment/FDC rail shipments."
+          elements:
+            TD301:
+              name: "Equipment Description Code"
+              type: ID
+              min_max: "2/2"
+              usage: optional
+              allowed_codes: [2B, 4B, BX, CV, FT, RF, RT]
+              business_rules:
+                - code: 2B
+                  meaning: "20 ft. IL Container (Closed Top)"
+                - code: 4B
+                  meaning: "40 ft. IL Container (Closed Top)"
+                - code: BX
+                  meaning: "Boxcar"
+                - code: CV
+                  meaning: "Closed Van"
+                - code: FT
+                  meaning: "Flat Bed Trailer"
+                - code: RF
+                  meaning: "Flat Car (rail)"
+                - code: RT
+                  meaning: "Controlled Temperature Trailer (Reefer)"
+            TD303:
+              name: "Equipment Number"
+              type: AN
+              min_max: "1/15"
+              usage: conditional
+              note: "Required when TD504=R (rail). Pure numeric preferred."
+            TD309:
+              name: "Seal Number"
+              type: AN
+              min_max: "2/15"
+              usage: optional
+            TD310:
+              name: "Equipment Type"
+              type: ID
+              min_max: "4/4"
+              usage: optional
+              note: "Mutually exclusive with TD301"
+
+        REF_shipment:
+          name: "Reference Information (Shipment Level)"
+          position: 1500
+          usage: optional
+          max_use: ">1"
+          elements:
+            REF01:
+              name: "Reference Identification Qualifier"
+              type: ID
+              min_max: "2/3"
+              usage: mandatory
+              allowed_codes: [MB]
+            REF02:
+              name: "Reference Identification"
+              type: AN
+              min_max: "1/50"
+              usage: mandatory
+          instances:
+            - qualifier: MB
+              description: "Master Bill of Lading"
+              required: false
+              note: >
+                For truckload shipments with multiple stop-offs, include master BOL
+                at shipment level. Sub-bills at order level.
+
+        DTM_shipment:
+          name: "Date/Time Reference (Shipment Level)"
+          position: 2000
+          usage: mandatory
+          max_use: 10
+          elements:
+            DTM01:
+              name: "Date/Time Qualifier"
+              type: ID
+              min_max: "3/3"
+              usage: mandatory
+              allowed_codes: ["011"]
+            DTM02:
+              name: "Date"
+              type: DT
+              min_max: "8/8"
+              usage: mandatory
+              format: "CCYYMMDD"
+            DTM03:
+              name: "Time"
+              type: TM
+              min_max: "4/8"
+              usage: optional
+            DTM04:
+              name: "Time Code"
+              type: ID
+              min_max: "2/2"
+              usage: conditional
+              condition: "Required if DTM03 is present"
+              allowed_codes: [CT, ET, LT, MT, PT]
+          instances:
+            - qualifier: "011"
+              description: "Shipped"
+              required: true
+              note: "Date (and optionally time/timezone) the shipment left the facility"
+
+        FOB_shipment:
+          name: "F.O.B. Related Instructions"
+          position: 2100
+          usage: mandatory
+          max_use: 1
+          note: "Transmit at shipment level (HL03=S)"
+          elements:
+            FOB01:
+              name: "Shipment Method of Payment"
+              type: ID
+              min_max: "2/2"
+              usage: mandatory
+              codelist_ref: shipment_method_of_payment
+              allowed_codes: [CC, CF, PC, PP]
+          turnaround:
+            source: { transaction: "850", segment: "FOB", element: "FOB01" }
+            rule: exact_copy
+
+        N1_shipment_loop:
+          name: "Party Identification (Shipment Level)"
+          position: 2200
+          usage: mandatory
+          max_loop: 200
+          note: "Ship From address at shipment level."
+          instances:
+            - qualifier_N101: SF
+              description: "Ship From"
+              required: true
+              elements:
+                N101: { fixed_value: "SF" }
+                N102: { usage: mandatory, note: "Name of company shipping the product" }
+              note: "Both N101 and N102 are required at shipment level"
+
+        N3_shipment:
+          name: "Party Location (Shipment Level)"
+          position: 2400
+          usage: optional
+          max_use: 2
+          note: "Address of the shipper, at shipment level (HL03=S)"
+
+        N4_shipment:
+          name: "Geographic Location (Shipment Level)"
+          position: 2500
+          usage: optional
+          max_use: 1
+          note: "City/state/zip of the shipper, at shipment level (HL03=S)"
+
+    # =========================================================================
+    # HL LEVEL: ORDER (HL03=O)
+    # =========================================================================
+    hl_order:
+      name: "Order Level"
+      hl_code: "O"
+      hl_parent: "S"
+      description: >
+        Order-level loop. Contains PO reference, packaging info, BOL,
+        vendor number, estimated arrival date, and ship-to location.
+        Required on every ASN. HL02 must link to shipment level HL01.
+      segments:
+
+        HL:
+          name: "Hierarchical Level"
+          position: 100
+          usage: mandatory
+          max_use: 1
+          elements:
+            HL01:
+              name: "Hierarchical ID Number"
+              type: AN
+              min_max: "1/12"
+              usage: mandatory
+              note: "Numeric only. Typically '2' for order level."
+            HL02:
+              name: "Hierarchical Parent ID Number"
+              type: AN
+              min_max: "1/12"
+              usage: mandatory
+              note: "Must equal the HL01 of the shipment-level HL (links order to shipment)"
+            HL03:
+              name: "Hierarchical Level Code"
+              type: ID
+              min_max: "1/2"
+              usage: mandatory
+              fixed_value: "O"
+
+        PRF:
+          name: "Purchase Order Reference"
+          position: 500
+          usage: mandatory
+          max_use: 1
+          elements:
+            PRF01:
+              name: "Purchase Order Number"
+              type: AN
+              min_max: "1/22"
+              usage: mandatory
+              constraints:
+                max_digits: 9
+              source:
+                primary: { transaction: "850", segment: "BEG", element: "BEG03" }
+              turnaround:
+                echoes_to:
+                  - { transaction: "810", segment: "BIG", element: "BIG04" }
+              business_rules:
+                - context: "Lowe's Owned"
+                  rule: "Use PO Number issued by Lowe's. Display as Customer PO # on packing lists and BOL."
+                - context: "FDC Consignment"
+                  rule: "PRF01=0 for consignment ASNs. The actual PO number is in BSN02."
+            PRF07:
+              name: "Purchase Order Type Code"
+              type: ID
+              min_max: "2/2"
+              usage: conditional
+              allowed_codes: [CN]
+              note: "Only present for FDC consignment ASNs. PRF07=CN."
+
+        PKG:
+          name: "Marking, Packaging, Loading"
+          position: 1000
+          usage: mandatory
+          max_use: 25
+          elements:
+            PKG01:
+              name: "Item Description Type"
+              type: ID
+              min_max: "1/1"
+              usage: optional
+              allowed_codes: [S]
+            PKG06:
+              name: "Unit Load Option Code"
+              type: ID
+              min_max: "2/2"
+              usage: mandatory
+              allowed_codes: ["01", "02"]
+              business_rules:
+                - code: "01"
+                  meaning: "Palletized"
+                - code: "02"
+                  meaning: "Floor Stack/Hand Pile"
+
+        REF_order:
+          name: "Reference Information (Order Level)"
+          position: 1500
+          usage: optional
+          max_use: ">1"
+          elements:
+            REF01:
+              name: "Reference Identification Qualifier"
+              type: ID
+              min_max: "2/3"
+              usage: mandatory
+              allowed_codes: [BM, CN, IA, MB]
+            REF02:
+              name: "Reference Identification"
+              type: AN
+              min_max: "1/50"
+              usage: mandatory
+          instances:
+            - qualifier: BM
+              description: "Bill of Lading Number"
+              required: false
+              note: "Optional in all ASNs. Report at order level."
+            - qualifier: CN
+              description: "Carrier's Reference Number (PRO/Invoice)"
+              required: false
+            - qualifier: IA
+              description: "Internal Vendor Number"
+              required: true
+              note: "Mandatory for both Detail and Summary ASNs."
+              turnaround:
+                source: { transaction: "850", segment: "REF", qualifier: "IA" }
+                rule: exact_copy
+            - qualifier: MB
+              description: "Master Bill of Lading"
+              required: false
+              note: "Sub-bills at order level when master BOL is at shipment level."
+
+        DTM_order:
+          name: "Date/Time Reference (Order Level)"
+          position: 2000
+          usage: mandatory
+          max_use: 10
+          elements:
+            DTM01:
+              name: "Date/Time Qualifier"
+              type: ID
+              min_max: "3/3"
+              usage: mandatory
+              allowed_codes: ["067"]
+            DTM02:
+              name: "Date"
+              type: DT
+              min_max: "8/8"
+              usage: mandatory
+              format: "CCYYMMDD"
+            DTM03:
+              name: "Time"
+              type: TM
+              min_max: "4/8"
+              usage: optional
+            DTM04:
+              name: "Time Code"
+              type: ID
+              min_max: "2/2"
+              usage: conditional
+              condition: "Required if DTM03 is present"
+              allowed_codes: [CT, ET, LT, MT, PT]
+          instances:
+            - qualifier: "067"
+              description: "Current Schedule Delivery (Estimated Arrival Date)"
+              required: true
+              note: "Mandatory at order level."
+
+        N1_order_loop:
+          name: "Party Identification (Order Level)"
+          position: 2200
+          usage: mandatory
+          max_loop: 200
+          overrides:
+            N103:
+              fixed_value: "94"
+              note: "856 uses qualifier 94 at order level (same as 855)"
+          instances:
+            - qualifier_N101: ST
+              description: "Ship To (store or distribution center)"
+              required: true
+              note: "Mandatory for both Detail and Summary ASNs."
+              turnaround:
+                source: { transaction: "850", segment: "N1", qualifier: "ST", element: "N104" }
+                rule: exact_copy
+                transform: { N103: { from: "93", to: "94" } }
+            - qualifier_N101: MA
+              description: "Party for whom Item is Ultimately Intended (cross-dock)"
+              required: false
+              condition: "Present only for vendor prepared cross-dock orders"
+              turnaround:
+                source: { transaction: "850", segment: "N1", qualifier: "MA", element: "N104" }
+                rule: exact_copy
+                transform: { N103: { from: "93", to: "94" } }
+            - qualifier_N101: SF
+              description: "Ship From"
+              required: false
+
+    # =========================================================================
+    # HL LEVEL: TARE/PALLET (HL03=T) — Detail ASN Only
+    # =========================================================================
+    hl_tare:
+      name: "Tare (Pallet) Level"
+      hl_code: "T"
+      hl_parent: "O"
+      condition: "Detail ASN only (BSN05=0001). Not included in Summary ASNs."
+      description: >
+        Pallet-level loop. Contains GS1-128 Serial Shipping Container Code
+        (SSCC-18). Each pallet gets its own HL and MAN segment.
+      segments:
+
+        HL:
+          name: "Hierarchical Level"
+          position: 100
+          usage: mandatory
+          max_use: 1
+          elements:
+            HL01:
+              name: "Hierarchical ID Number"
+              type: AN
+              min_max: "1/12"
+              usage: mandatory
+              note: "Numeric only. Increments for each pallet."
+            HL02:
+              name: "Hierarchical Parent ID Number"
+              type: AN
+              min_max: "1/12"
+              usage: mandatory
+              note: "Must equal HL01 of the order-level HL"
+            HL03:
+              name: "Hierarchical Level Code"
+              type: ID
+              min_max: "1/2"
+              usage: mandatory
+              fixed_value: "T"
+
+        MAN:
+          name: "Marks and Numbers Information"
+          position: 1900
+          usage: mandatory
+          max_use: ">1"
+          condition: "Required for Detail ASNs with GS1-128. Not included in Summary ASNs."
+          elements:
+            MAN01:
+              name: "Marks and Numbers Qualifier"
+              type: ID
+              min_max: "1/2"
+              usage: mandatory
+              fixed_value: "GM"
+              note: "GM = SSCC-18 and Application Identifier"
+            MAN02:
+              name: "Marks and Numbers"
+              type: AN
+              min_max: "1/48"
+              usage: mandatory
+              note: "GS1-128 Serial Shipping Container Code (SSCC-18)"
+
+    # =========================================================================
+    # HL LEVEL: ITEM (HL03=I)
+    # =========================================================================
+    hl_item:
+      name: "Item Level"
+      hl_code: "I"
+      hl_parent: "T or O"
+      description: >
+        Item-level loop. Contains product identification and quantity shipped.
+        In Detail ASN: parent is Tare (T). In Summary ASN: parent is Order (O).
+      segments:
+
+        HL:
+          name: "Hierarchical Level"
+          position: 100
+          usage: mandatory
+          max_use: 1
+          elements:
+            HL01:
+              name: "Hierarchical ID Number"
+              type: AN
+              min_max: "1/12"
+              usage: mandatory
+              note: "Numeric only. Increments for each item."
+            HL02:
+              name: "Hierarchical Parent ID Number"
+              type: AN
+              min_max: "1/12"
+              usage: mandatory
+              note: "Detail ASN: parent is Tare HL01. Summary ASN: parent is Order HL01."
+            HL03:
+              name: "Hierarchical Level Code"
+              type: ID
+              min_max: "1/2"
+              usage: mandatory
+              fixed_value: "I"
+
+        LIN:
+          name: "Item Identification"
+          position: 200
+          usage: mandatory
+          max_use: 1
+          elements:
+            LIN02:
+              name: "Product/Service ID Qualifier"
+              type: ID
+              min_max: "2/2"
+              usage: mandatory
+              allowed_codes: [CB, EN, UK, UP]
+              business_rules:
+                - code: CB
+                  meaning: "Buyer's Catalog Number (Lowe's SKU) — preferred"
+                - code: EN
+                  meaning: "EAN/UCC-13"
+                - code: UK
+                  meaning: "EAN/UCC-14"
+                - code: UP
+                  meaning: "UCC-12 (UPC)"
+              note: "Wherever possible, send the Lowe's item number (CB). If unavailable, send UPC."
+            LIN03:
+              name: "Product/Service ID"
+              type: AN
+              min_max: "1/48"
+              usage: mandatory
+          turnaround:
+            source: { transaction: "850", segment: "PO1", elements: ["PO106", "PO107"] }
+            rule: preferred
+            note: "Prefer Lowe's SKU (CB) from PO1"
+
+        SN1:
+          name: "Item Detail (Shipment)"
+          position: 300
+          usage: mandatory
+          max_use: 1
+          elements:
+            SN102:
+              name: "Number of Units Shipped"
+              type: R
+              min_max: "1/10"
+              usage: mandatory
+              note: >
+                UOM and quantity should reflect how Lowe's sells goods to the
+                consumer, not how the vendor packages for shipment.
+            SN103:
+              name: "Unit or Basis for Measurement Code"
+              type: ID
+              min_max: "2/2"
+              usage: mandatory
+              note: "Must match UOM from the purchase order"
+          turnaround:
+            source: { transaction: "850", segment: "PO1", elements: ["PO102", "PO103"] }
+            rule: preferred
+            note: >
+              SN1 quantity should reflect what was actually shipped, which
+              should be <= the acknowledged quantity from the 855 ACK segment.
+
+  # ---------------------------------------------------------------------------
+  # SUMMARY SEGMENTS
+  # ---------------------------------------------------------------------------
+  summary:
+
+    CTT:
+      name: "Transaction Totals"
+      position: 100
+      usage: mandatory
+      max_use: 1
+      elements:
+        CTT01:
+          name: "Number of Line Items"
+          type: N0
+          min_max: "1/6"
+          usage: mandatory
+          computed: "Total number of item-level HL loops (HL03=I)"
+
+  # ---------------------------------------------------------------------------
+  # CROSS-DOCK RULES
+  # ---------------------------------------------------------------------------
+  cross_dock_rules:
+    definition: >
+      Vendor Prepared Cross-Dock: product processed through a Lowe's Distribution
+      Center and immediately placed on another truck for shipping to a Store.
+    n1_structure: >
+      Ship To (ST) = Distribution Center (vendor's delivery location).
+      Ultimate Destination (MA) = Final store destination.
+    invoice_target: >
+      Invoice must be for the MA (ultimate store), NOT the ST (RDC).
+
+  # ---------------------------------------------------------------------------
+  # HL HIERARCHY EXAMPLES
+  # ---------------------------------------------------------------------------
+  examples:
+    detail_asn:
+      description: "Detail ASN with GS1-128 labeling at pallet level"
+      data: |
+        BSN*00*999999999*20001001*1700*0001
+        HL*1**S
+        TD1*PLT*24
+        TD5**2*SCAC*M
+        TD3*CV**9999
+        REF*MB*999
+        DTM*011*20001001*1600*ET
+        FOB*PP
+        N1*SF*ABC Widgets
+        N3*1532 North Main Street
+        N4*Smithville*NC*12345
+        HL*2*1*O
+        PRF*999999999
+        PKG*S****01
+        REF*IA*1234567
+        REF*BM*BOL123
+        DTM*067*20001005
+        N1*ST**94*1234
+        HL*3*2*T
+        MAN*GM*00001234560000000001
+        HL*4*3*I
+        LIN**CB*123456
+        SN1**24*EA
+        HL*5*2*T
+        MAN*GM*00001234560000000002
+        HL*6*5*I
+        LIN**CB*789012
+        SN1**12*EA
+        CTT*2
+    summary_asn:
+      description: "Summary ASN without GS1-128 labeling"
+      data: |
+        BSN*00*8888888888*20001001*1700*0004
+        HL*1**S
+        TD5**2*SCAC*M
+        DTM*011*20001001
+        FOB*PP
+        N1*SF*ABC Widgets
+        HL*2*1*O
+        PRF*999999999
+        PKG*S****02
+        REF*IA*1234567
+        DTM*067*20001005
+        N1*ST**94*1234
+        HL*3*2*I
+        LIN**CB*123456
+        SN1**24*EA
+        HL*4*2*I
+        LIN**CB*789012
+        SN1**12*EA
+        CTT*2
+    consignment_asn:
+      description: "FDC Consignment ASN"
+      data: |
+        BSN*00*VENDORPO12345*20001001*1700*0004
+        HL*1**S
+        ...
+        HL*2*1*O
+        PRF*0******CN
+        ...

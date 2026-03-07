@@ -1,0 +1,436 @@
+# =============================================================================
+# 850 STOCK PURCHASE ORDER - Lowe's → Vendor (Inbound)
+# =============================================================================
+# Version: 004010 | Modified: 2023-04-21
+# Functional Group: PO
+# Direction: Inbound (Lowe's sends to Vendor)
+#
+# Shared segments (ISA, GS, ST, N1, N3, N4, FOB, CTT, SE, GE, IEA) are
+# defined in shared/ and inherited here. This file defines only the
+# 850-specific segments, overrides, and business rules.
+# =============================================================================
+
+transaction:
+  id: "850"
+  name: "Stock Purchase Order"
+  functional_group: "PO"
+  direction: inbound
+  version: "004010"
+
+  shared_refs:
+    envelope: shared/envelope.yaml
+    common: shared/common_segments.yaml
+    codelists: shared/codelists.yaml
+
+  # ---------------------------------------------------------------------------
+  # ENVELOPE OVERRIDES (850-specific)
+  # ---------------------------------------------------------------------------
+  envelope_overrides:
+    GS:
+      GS01: { fixed_value: "PO" }
+    ST:
+      ST01: { fixed_value: "850" }
+
+  # ---------------------------------------------------------------------------
+  # HEADING SEGMENTS
+  # ---------------------------------------------------------------------------
+  heading:
+
+    BEG:
+      name: "Beginning Segment for Purchase Order"
+      position: 20
+      usage: mandatory
+      max_use: 1
+      elements:
+        BEG01:
+          name: "Transaction Set Purpose Code"
+          type: ID
+          min_max: "2/2"
+          usage: mandatory
+          fixed_value: "00"         # Always "Original" for stock orders
+        BEG02:
+          name: "Purchase Order Type Code"
+          type: ID
+          min_max: "2/2"
+          usage: mandatory
+          codelist_ref: purchase_order_type
+          allowed_codes: [SA, NS, SP]
+          business_rules:
+            - "SP sent when ALL items are display items"
+            - "NS sent when all items are stock, or mix of display and stock"
+            - "SA sent for stand-alone orders"
+        BEG03:
+          name: "Purchase Order Number"
+          type: AN
+          min_max: "1/22"
+          usage: mandatory
+          constraints:
+            max_digits: 9
+            format: "zero-suppressed"
+          turnaround:
+            echoes_to:
+              - { transaction: "810", segment: "BIG", element: "BIG04" }
+              - { transaction: "855", segment: "BAK", element: "BAK03" }
+        BEG05:
+          name: "Date"
+          type: DT
+          min_max: "8/8"
+          usage: mandatory
+          format: "CCYYMMDD"
+
+    CUR:
+      name: "Currency"
+      position: 40
+      usage: mandatory
+      max_use: 1
+      turnaround:
+        echo_entire_segment: true
+        echoes_to:
+          - { transaction: "810", segment: "CUR" }
+      elements:
+        CUR01:
+          name: "Entity Identifier Code"
+          type: ID
+          min_max: "2/3"
+          usage: mandatory
+          fixed_value: "SE"
+        CUR02:
+          name: "Currency Code"
+          type: ID
+          min_max: "3/3"
+          usage: mandatory
+          codelist_ref: currency_code
+
+    REF:
+      name: "Reference Identification"
+      position: 50
+      usage: mandatory
+      max_use: ">1"
+      note: "Multiple REF segments: vendor number (IA), RP ref (WO), dept (DP), truck load (AN)"
+      elements:
+        REF01:
+          name: "Reference Identification Qualifier"
+          type: ID
+          min_max: "2/2"
+          usage: mandatory
+          allowed_codes: [IA, WO, DP, AN]
+        REF02:
+          name: "Reference Identification"
+          type: AN
+          min_max: "1/9"
+          usage: mandatory
+        REF03:
+          name: "Description"
+          type: AN
+          min_max: "1/5"
+          usage: conditional
+          condition: "Present when REF01=DP (department name abbreviation)"
+      business_rules:
+        - qualifier: IA
+          description: "Internal Vendor Number assigned by Lowe's. Always present."
+        - qualifier: WO
+          description: "Replenishment Program reference number. Optional on 850."
+          turnaround:
+            echoes_to:
+              - { transaction: "855", segment: "REF", qualifier: "WO" }
+        - qualifier: AN
+          description: "VPXD Truck Load Number for cross-dock shipments."
+          turnaround:
+            echoes_to:
+              - { transaction: "855", segment: "REF", qualifier: "AN" }
+        - qualifier: DP
+          description: "Department number and name abbreviation."
+          rules:
+            - "If all items same dept → dept number at header + item level"
+            - "If mixed depts → header shows 99/MIXED, items show individual depts"
+            - "If no dept assigned → 0/MISC"
+
+    PER:
+      name: "Administrative Communications Contact"
+      position: 60
+      usage: mandatory
+      max_use: 3
+      elements:
+        PER01:
+          name: "Contact Function Code"
+          type: ID
+          min_max: "2/2"
+          usage: mandatory
+          allowed_codes: [BD, DC]
+        PER02:
+          name: "Name"
+          type: AN
+          min_max: "1/60"
+          usage: optional
+        PER03:
+          name: "Communication Number Qualifier"
+          type: ID
+          min_max: "2/2"
+          usage: optional
+          allowed_codes: [TE]
+        PER04:
+          name: "Communication Number"
+          type: AN
+          min_max: "1/80"
+          usage: optional
+
+    FOB:
+      name: "F.O.B. Related Instructions"
+      position: 80
+      usage: mandatory
+      max_use: ">1"
+      overrides:
+        FOB02:
+          name: "Location Qualifier"
+          type: ID
+          min_max: "1/2"
+          usage: optional
+          allowed_codes: [CA]
+        FOB03:
+          name: "Description"
+          type: AN
+          min_max: "1/80"
+          usage: optional
+          note: "Country of origin code when FOB02=CA"
+      turnaround:
+        field: FOB01
+        echoes_to:
+          - { transaction: "810", segment: "FOB", element: "FOB01" }
+        note: "Only FOB01 is required on the 810; FOB02 and FOB03 are not"
+
+    SAC:
+      name: "Service, Promotion, Allowance, or Charge Information"
+      position: 120
+      usage: optional
+      max_use: 1
+      loop: SAC
+      max_loop: 25
+      condition: "Only transmitted when BEG02 = NS (New Store Opening)"
+      elements:
+        SAC01:
+          name: "Allowance or Charge Indicator"
+          type: ID
+          min_max: "1/1"
+          usage: mandatory
+          allowed_codes: [R]
+        SAC02:
+          name: "Service/Promotion/Allowance/Charge Code"
+          type: ID
+          min_max: "4/4"
+          usage: mandatory
+          allowed_codes: [E740]
+      note: >
+        SAC from 850 is NOT automatically returned on the 810.
+        The 810 SAC uses a different set of codes and different logic.
+
+    DTM:
+      name: "Date/Time Reference"
+      position: 150
+      usage: mandatory
+      max_use: 10
+      elements:
+        DTM01:
+          name: "Date/Time Qualifier"
+          type: ID
+          min_max: "3/3"
+          usage: mandatory
+          allowed_codes: ["002", "010"]
+        DTM02:
+          name: "Date"
+          type: DT
+          min_max: "8/8"
+          usage: mandatory
+          format: "CCYYMMDD"
+      instances:
+        - qualifier: "002"
+          description: "Delivery Requested"
+          required: true
+          note: "Date product should arrive at final destination"
+        - qualifier: "010"
+          description: "Requested Ship"
+          required: false
+          note: "Present on most stock POs. Date shipment should leave vendor."
+      turnaround:
+        note: >
+          DTM qualifiers CHANGE between 850 and 810.
+          850 DTM 002 (Delivery Requested) / 010 (Requested Ship)
+          810 DTM 011 (Shipped) / 008 (Purchase Order Received)
+          Data is NOT automatically echoed.
+
+    N1_loop:
+      name: "Name Loop"
+      position: 310
+      usage: mandatory
+      max_loop: 200
+      overrides:
+        N103:
+          fixed_value: "93"
+          note: "850 uses qualifier 93; changes to 92 on 810, 94 on 855"
+      instances:
+        - qualifier_N101: ST
+          description: "Ship To (store or RDC for cross-dock)"
+          required: true
+        - qualifier_N101: MA
+          description: "Ultimate store destination (cross-dock only)"
+          required: false
+          condition: "Present only on cross-dock orders"
+      cross_dock_rules:
+        - "ST = distribution center (vendor's delivery location)"
+        - "MA = final store destination"
+        - "Arrival date is when product reaches the FINAL store, not the DC"
+        - "Invoice must be for the MA store, NOT the ST RDC"
+      turnaround:
+        - field: N104
+          qualifier: ST
+          echoes_to:
+            - { transaction: "810", segment: "N1", qualifier: "ST", element: "N104" }
+          transform:
+            N103: { from: "93", to: "92" }
+        - field: N104
+          qualifier: MA
+          echoes_to:
+            - { transaction: "810", segment: "N1", qualifier: "MA", element: "N104" }
+          transform:
+            N103: { from: "93", to: "92" }
+
+    CTB:
+      name: "Restrictions/Conditions"
+      position: 280
+      usage: optional
+      max_use: 5
+      elements:
+        CTB01:
+          name: "Restrictions/Conditions Qualifier"
+          type: ID
+          min_max: "2/2"
+          usage: mandatory
+          allowed_codes: [OR]
+        CTB02:
+          name: "Description"
+          type: AN
+          min_max: "1/80"
+          usage: mandatory
+
+  # ---------------------------------------------------------------------------
+  # DETAIL SEGMENTS
+  # ---------------------------------------------------------------------------
+  detail:
+
+    PO1:
+      name: "Baseline Item Data"
+      position: 10
+      usage: mandatory
+      max_use: 1
+      loop: PO1
+      max_loop: 100000
+      elements:
+        PO101:
+          name: "Assigned Identification"
+          type: AN
+          min_max: "1/20"
+          usage: mandatory
+          note: "Line item sequence number"
+        PO102:
+          name: "Quantity Ordered"
+          type: R
+          min_max: "1/15"
+          usage: mandatory
+        PO103:
+          name: "Unit or Basis for Measurement Code"
+          type: ID
+          min_max: "2/2"
+          usage: mandatory
+          codelist_ref: unit_of_measure
+          turnaround:
+            echoes_to:
+              - { transaction: "810", segment: "IT1", element: "IT103" }
+        PO104:
+          name: "Unit Price"
+          type: R
+          min_max: "1/17"
+          usage: mandatory
+        PO105:
+          name: "Basis of Unit Price Code"
+          type: ID
+          min_max: "2/2"
+          usage: optional
+          allowed_codes: [NC, QT]
+        PO106:
+          name: "Product/Service ID Qualifier"
+          type: ID
+          min_max: "2/2"
+          usage: mandatory
+          fixed_value: "CB"
+        PO107:
+          name: "Product/Service ID (Lowe's SKU)"
+          type: AN
+          min_max: "1/48"
+          usage: mandatory
+          turnaround:
+            echoes_to:
+              - { transaction: "810", segment: "IT1", element: "IT107" }
+        PO108:
+          name: "Product/Service ID Qualifier (Vendor)"
+          type: ID
+          min_max: "2/2"
+          usage: conditional
+          allowed_codes: [VC]
+        PO109:
+          name: "Product/Service ID (Vendor Model)"
+          type: AN
+          min_max: "1/48"
+          usage: conditional
+          note: "May not transmit for shared items between vendors"
+      turnaround:
+        preferred_echo: true
+        required_fields_on_810: [IT101, IT102, IT103, IT104, IT106, IT107]
+        note: "Prefer to echo all PO1 fields in IT1; first 7 are mandatory"
+
+    PID:
+      name: "Product/Item Description"
+      position: 50
+      usage: optional
+      max_use: 1
+      loop: PID
+      max_loop: 1000
+      elements:
+        PID01:
+          name: "Item Description Type"
+          type: ID
+          min_max: "1/1"
+          usage: mandatory
+          fixed_value: "F"
+        PID05:
+          name: "Description"
+          type: AN
+          min_max: "1/80"
+          usage: mandatory
+      turnaround:
+        echo_entire_segment: true
+        echoes_to:
+          - { transaction: "810", segment: "PID" }
+        note: "Must echo PID*F segment exactly as received"
+
+    REF_detail:
+      name: "Reference Identification (Detail Level)"
+      position: 100
+      usage: optional
+      max_use: 1
+      loop: PO1
+      elements:
+        REF01:
+          name: "Reference Identification Qualifier"
+          type: ID
+          min_max: "2/2"
+          usage: mandatory
+          allowed_codes: [DP]
+        REF02:
+          name: "Reference Identification (Department Number)"
+          type: AN
+          min_max: "1/2"
+          usage: mandatory
+        REF03:
+          name: "Description (Department Name Abbreviation)"
+          type: AN
+          min_max: "1/5"
+          usage: mandatory

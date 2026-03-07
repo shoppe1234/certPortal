@@ -1,0 +1,193 @@
+# =============================================================================
+# SHARED ENVELOPE SEGMENTS
+# =============================================================================
+# ISA/GS/GE/IEA are structurally identical across 850, 855, and 810.
+# Each transaction YAML references this file and only overrides the
+# functional_group code and direction-specific sender/receiver IDs.
+# =============================================================================
+
+segments:
+
+  ISA:
+    name: "Interchange Control Header"
+    usage: mandatory
+    max_use: 1
+    elements:
+      ISA01:
+        name: "Authorization Information Qualifier"
+        type: ID
+        min_max: "2/2"
+        usage: mandatory
+        fixed_value: "00"
+      ISA02:
+        name: "Authorization Information"
+        type: AN
+        min_max: "10/10"
+        usage: mandatory
+        note: "Pad with spaces"
+      ISA03:
+        name: "Security Information Qualifier"
+        type: ID
+        min_max: "2/2"
+        usage: mandatory
+        fixed_value: "00"
+      ISA04:
+        name: "Security Information"
+        type: AN
+        min_max: "10/10"
+        usage: mandatory
+        note: "Pad with spaces"
+      ISA05:
+        name: "Interchange ID Qualifier (Sender)"
+        type: ID
+        min_max: "2/2"
+        usage: mandatory
+      ISA06:
+        name: "Interchange Sender ID"
+        type: AN
+        min_max: "15/15"
+        usage: mandatory
+      ISA07:
+        name: "Interchange ID Qualifier (Receiver)"
+        type: ID
+        min_max: "2/2"
+        usage: mandatory
+      ISA08:
+        name: "Interchange Receiver ID"
+        type: AN
+        min_max: "15/15"
+        usage: mandatory
+      ISA09:
+        name: "Interchange Date"
+        type: DT
+        min_max: "6/6"
+        usage: mandatory
+        format: "YYMMDD"
+      ISA10:
+        name: "Interchange Time"
+        type: TM
+        min_max: "4/4"
+        usage: mandatory
+        format: "HHMM"
+      ISA11:
+        name: "Interchange Control Standards Identifier"
+        type: ID
+        min_max: "1/1"
+        usage: mandatory
+        fixed_value: "U"
+      ISA12:
+        name: "Interchange Control Version Number"
+        type: ID
+        min_max: "5/5"
+        usage: mandatory
+        fixed_value: "00400"
+      ISA13:
+        name: "Interchange Control Number"
+        type: N0
+        min_max: "9/9"
+        usage: mandatory
+        note: "Must match IEA02"
+      ISA14:
+        name: "Acknowledgment Requested"
+        type: ID
+        min_max: "1/1"
+        usage: mandatory
+        fixed_value: "0"
+      ISA15:
+        name: "Usage Indicator"
+        type: ID
+        min_max: "1/1"
+        usage: mandatory
+        codes:
+          P: "Production Data"
+          T: "Test Data"
+      ISA16:
+        name: "Component Element Separator"
+        min_max: "1/1"
+        usage: mandatory
+        fixed_value: ">"
+
+  GS:
+    name: "Functional Group Header"
+    usage: mandatory
+    max_use: 1
+    elements:
+      GS01:
+        name: "Functional Identifier Code"
+        type: ID
+        min_max: "2/2"
+        usage: mandatory
+        note: "Overridden per transaction: PO (850), PR (855), IN (810)"
+      GS02:
+        name: "Application Sender's Code"
+        type: AN
+        min_max: "2/15"
+        usage: mandatory
+      GS03:
+        name: "Application Receiver's Code"
+        type: AN
+        min_max: "2/15"
+        usage: mandatory
+      GS04:
+        name: "Date"
+        type: DT
+        min_max: "8/8"
+        usage: mandatory
+        format: "CCYYMMDD"
+      GS05:
+        name: "Time"
+        type: TM
+        min_max: "4/8"
+        usage: mandatory
+      GS06:
+        name: "Group Control Number"
+        type: N0
+        min_max: "1/9"
+        usage: mandatory
+        note: "Must match GE02"
+      GS07:
+        name: "Responsible Agency Code"
+        type: ID
+        min_max: "1/2"
+        usage: mandatory
+        fixed_value: "X"
+      GS08:
+        name: "Version / Release / Industry Identifier Code"
+        type: AN
+        min_max: "1/12"
+        usage: mandatory
+        fixed_value: "004010"
+
+  GE:
+    name: "Functional Group Trailer"
+    usage: mandatory
+    max_use: 1
+    elements:
+      GE01:
+        name: "Number of Transaction Sets Included"
+        type: N0
+        min_max: "1/6"
+        usage: mandatory
+      GE02:
+        name: "Group Control Number"
+        type: N0
+        min_max: "1/9"
+        usage: mandatory
+        cross_ref: "Must match GS06"
+
+  IEA:
+    name: "Interchange Control Trailer"
+    usage: mandatory
+    max_use: 1
+    elements:
+      IEA01:
+        name: "Number of Included Functional Groups"
+        type: N0
+        min_max: "1/5"
+        usage: mandatory
+      IEA02:
+        name: "Interchange Control Number"
+        type: N0
+        min_max: "9/9"
+        usage: mandatory
+        cross_ref: "Must match ISA13"

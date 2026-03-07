@@ -1,0 +1,592 @@
+# =============================================================================
+# 810 INVOICE - Vendor → Lowe's (Outbound)
+# =============================================================================
+# Version: 004010 | Modified: 2018-09-28
+# Functional Group: IN
+# Direction: Outbound (Vendor sends to Lowe's)
+#
+# Covers both Stock and SOS invoice requirements.
+# The PO number in BIG04 must match either:
+#   - BEG03 from the originating 850
+#   - BAK03 from a vendor-initiated 855 reverse PO
+# =============================================================================
+
+transaction:
+  id: "810"
+  name: "Invoice"
+  functional_group: "IN"
+  direction: outbound
+  version: "004010"
+
+  shared_refs:
+    envelope: shared/envelope.yaml
+    common: shared/common_segments.yaml
+    codelists: shared/codelists.yaml
+
+  # ---------------------------------------------------------------------------
+  # ENVELOPE OVERRIDES
+  # ---------------------------------------------------------------------------
+  envelope_overrides:
+    GS:
+      GS01: { fixed_value: "IN" }
+    ST:
+      ST01: { fixed_value: "810" }
+
+  # ---------------------------------------------------------------------------
+  # HEADING SEGMENTS
+  # ---------------------------------------------------------------------------
+  heading:
+
+    BIG:
+      name: "Beginning Segment for Invoice"
+      position: 20
+      usage: mandatory
+      max_use: 1
+      elements:
+        BIG01:
+          name: "Invoice Date"
+          type: DT
+          min_max: "8/8"
+          usage: mandatory
+          format: "CCYYMMDD"
+        BIG02:
+          name: "Invoice Number"
+          type: AN
+          min_max: "1/22"
+          usage: mandatory
+          constraints:
+            max_digits: 10
+            note: "Lowe's Payables truncates beyond 10 digits"
+        BIG03:
+          name: "Purchase Order Date"
+          type: DT
+          min_max: "8/8"
+          usage: mandatory
+          format: "CCYYMMDD"
+        BIG04:
+          name: "Purchase Order Number"
+          type: AN
+          min_max: "1/22"
+          usage: mandatory
+          constraints:
+            max_digits: 9
+          source:
+            primary: { transaction: "850", segment: "BEG", element: "BEG03" }
+            alternate: { transaction: "855", segment: "BAK", element: "BAK03" }
+          note: "Must match the PO number from the originating 850 or 855"
+        BIG07:
+          name: "Transaction Type Code"
+          type: ID
+          min_max: "2/2"
+          usage: optional
+          default: "DR"
+          codes:
+            CR: "Credit Memo"
+            DR: "Debit Memo"
+            ME: "Memorandum"
+
+    NTE:
+      name: "Note/Special Instruction"
+      position: 30
+      usage: optional
+      max_use: 100
+      elements:
+        NTE01:
+          name: "Note Reference Code"
+          type: ID
+          min_max: "3/3"
+          usage: mandatory
+          fixed_value: "GEN"
+        NTE02:
+          name: "Description"
+          type: AN
+          min_max: "1/80"
+          usage: mandatory
+
+    CUR:
+      name: "Currency"
+      position: 40
+      usage: mandatory
+      max_use: 1
+      turnaround_source: { transaction: "850", segment: "CUR" }
+      note: "Echo CUR segment exactly as received on the 850 PO"
+      elements:
+        CUR01:
+          name: "Entity Identifier Code"
+          type: ID
+          min_max: "2/3"
+          usage: mandatory
+          fixed_value: "SE"
+        CUR02:
+          name: "Currency Code"
+          type: ID
+          min_max: "3/3"
+          usage: mandatory
+          codelist_ref: currency_code
+
+    N1_loop:
+      name: "Name Loop"
+      position: 70
+      usage: mandatory
+      max_loop: 200
+      overrides:
+        N103:
+          allowed_codes: ["92", "94"]
+          note: "810 uses 92 (for ST/MA) and 94 (for RI)"
+      instances:
+        - qualifier_N101: ST
+          description: "Ship To"
+          required: true
+          qualifier_N103: "92"
+          turnaround_source:
+            transaction: "850"
+            segment: "N1"
+            qualifier: "ST"
+            element: "N104"
+        - qualifier_N101: MA
+          description: "Party for whom Item is Ultimately Intended"
+          required: false
+          qualifier_N103: "92"
+          turnaround_source:
+            transaction: "850"
+            segment: "N1"
+            qualifier: "MA"
+            element: "N104"
+        - qualifier_N101: RI
+          description: "Remit To"
+          required: false
+          qualifier_N103: "94"
+      cross_dock_rules:
+        ordering: >
+          If both MA and ST are transmitted, the N1 with MA in N101
+          MUST be the SECOND in sequence. If ST comes last, the invoice
+          picks up the wrong store number and will be rejected.
+        invoice_target: >
+          Always invoice to the MA (ultimate store destination),
+          NOT the ST (RDC / intermediate consignee).
+
+    N3:
+      name: "Address Information"
+      position: 90
+      usage: optional
+      turnaround_source: { transaction: "850", segment: "N3" }
+      note: "Echo N3 exactly as received on the 850 PO"
+
+    N4:
+      name: "Geographic Location"
+      position: 100
+      usage: optional
+      turnaround_source: { transaction: "850", segment: "N4" }
+      note: "Echo N4 exactly as received on the 850 PO"
+
+    ITD:
+      name: "Terms of Sale/Deferred Terms of Sale"
+      position: 130
+      usage: mandatory
+      max_use: ">1"
+      elements:
+        ITD01:
+          name: "Terms Type Code"
+          type: ID
+          min_max: "2/2"
+          usage: mandatory
+          allowed_codes: ["05", "08"]
+        ITD02:
+          name: "Terms Basis Date Code"
+          type: ID
+          min_max: "1/2"
+          usage: mandatory
+          fixed_value: "3"           # Invoice Date
+        ITD03:
+          name: "Terms Discount Percent"
+          type: R
+          min_max: "1/6"
+          usage: optional
+          note: "2% expressed as '2'. Required when ITD01=08."
+        ITD04:
+          name: "Terms Discount Due Date"
+          type: DT
+          min_max: "8/8"
+          usage: optional
+          note: "Use ITD04 OR ITD05, not both"
+        ITD05:
+          name: "Terms Discount Days Due"
+          type: N0
+          min_max: "1/3"
+          usage: optional
+          note: "Days from invoice date to discount due date. Use ITD04 OR ITD05."
+        ITD06:
+          name: "Terms Net Due Date"
+          type: DT
+          min_max: "8/8"
+          usage: optional
+          note: "Use ITD06 OR ITD07, not both. One MUST be present on ALL invoices."
+        ITD07:
+          name: "Terms Net Days"
+          type: N0
+          min_max: "1/3"
+          usage: optional
+          note: "Days from invoice date (BIG01) to due date. Use ITD06 OR ITD07."
+        ITD08:
+          name: "Terms Discount Amount"
+          type: N2
+          min_max: "1/10"
+          usage: optional
+          note: "Total discount amount. Required when ITD01=08."
+        ITD12:
+          name: "Description"
+          type: AN
+          min_max: "1/80"
+          usage: mandatory
+      variants:
+        with_discount:
+          condition: "ITD01=08"
+          required_fields: [ITD01, ITD02, ITD03, ITD08, ITD12]
+          one_of: [[ITD04, ITD05]]
+          one_of_also: [[ITD06, ITD07]]
+          example: "ITD*08*3*2**15**16*144****2% 15 NET 16"
+        no_discount:
+          condition: "ITD01=05"
+          required_fields: [ITD01, ITD02, ITD12]
+          one_of: [[ITD06, ITD07]]
+          example: "ITD*05*3*****16*****No Discount Offered"
+
+    DTM:
+      name: "Date/Time Reference"
+      position: 140
+      usage: mandatory
+      max_use: 10
+      elements:
+        DTM01:
+          name: "Date/Time Qualifier"
+          type: ID
+          min_max: "3/3"
+          usage: mandatory
+          allowed_codes: ["011", "008"]
+        DTM02:
+          name: "Date"
+          type: DT
+          min_max: "8/8"
+          usage: mandatory
+          format: "CCYYMMDD"
+      instances:
+        - qualifier: "011"
+          description: "Shipped"
+          required: true
+        - qualifier: "008"
+          description: "Purchase Order Received"
+          required: true
+      turnaround_note: >
+        DTM qualifiers CHANGE between 850 and 810. Do NOT echo 850 DTM directly.
+        850 uses 002 (Delivery Requested) and 010 (Requested Ship).
+        810 uses 011 (Shipped) and 008 (PO Received).
+
+    FOB:
+      name: "F.O.B. Related Instructions"
+      position: 150
+      usage: mandatory
+      max_use: 1
+      turnaround_source: { transaction: "850", segment: "FOB", element: "FOB01" }
+      note: "Echo FOB01 from the 850 PO"
+      freight_rules:
+        PC: "Must include SAC segment with freight charges (D240). Freight CANNOT be a line item."
+        CF: "Must include SAC segment with freight allowance."
+
+  # ---------------------------------------------------------------------------
+  # DETAIL SEGMENTS
+  # ---------------------------------------------------------------------------
+  detail:
+
+    IT1:
+      name: "Baseline Item Data (Invoice)"
+      position: 10
+      usage: mandatory
+      max_use: 1
+      loop: IT1
+      max_loop: 200000
+      elements:
+        IT101:
+          name: "Assigned Identification"
+          type: AN
+          min_max: "1/20"
+          usage: mandatory
+        IT102:
+          name: "Quantity Invoiced"
+          type: R
+          min_max: "1/10"
+          usage: mandatory
+        IT103:
+          name: "Unit or Basis for Measurement Code"
+          type: ID
+          min_max: "2/2"
+          usage: mandatory
+          note: "Must match UOM from the purchase order"
+        IT104:
+          name: "Unit Price"
+          type: R
+          min_max: "1/17"
+          usage: mandatory
+        IT106:
+          name: "Product/Service ID Qualifier"
+          type: ID
+          min_max: "2/2"
+          usage: mandatory
+          fixed_value: "CB"
+        IT107:
+          name: "Product/Service ID (Lowe's SKU)"
+          type: AN
+          min_max: "1/48"
+          usage: mandatory
+          note: "Always use the Lowe's SKU from the purchase order"
+        IT108:
+          name: "Product/Service ID Qualifier (Vendor)"
+          type: ID
+          min_max: "2/2"
+          usage: optional
+          allowed_codes: [VC]
+        IT109:
+          name: "Product/Service ID (Vendor Model)"
+          type: AN
+          min_max: "1/48"
+          usage: optional
+        IT110:
+          name: "Product/Service ID Qualifier (UPC)"
+          type: ID
+          min_max: "2/2"
+          usage: optional
+          allowed_codes: [UK]
+        IT111:
+          name: "Product/Service ID (UPC Code)"
+          type: AN
+          min_max: "1/48"
+          usage: optional
+      turnaround:
+        source: { transaction: "850", segment: "PO1" }
+        rule: "preferred_echo"
+        required_fields: [IT101, IT102, IT103, IT104, IT106, IT107]
+        note: "First 7 fields mandatory; prefer echoing all PO1 fields"
+
+    PID:
+      name: "Product/Item Description"
+      position: 60
+      usage: mandatory
+      max_use: 1
+      loop: PID
+      max_loop: 1000
+      elements:
+        PID01:
+          name: "Item Description Type"
+          type: ID
+          min_max: "1/1"
+          usage: mandatory
+          allowed_codes: [F, X]
+        PID03:
+          name: "Agency Qualifier Code"
+          type: ID
+          min_max: "2/2"
+          usage: optional
+          allowed_codes: [VI]
+        PID04:
+          name: "Product Description Code"
+          type: AN
+          min_max: "1/12"
+          usage: optional
+          note: >
+            Code breakdown: Pos 1-2: GM (General Merchandise),
+            Pos 3-4: 04 (Format/Option), Pos 5-8: COMP (Regulatory Compliance),
+            Pos 9-10: FE (CARB) or TS (TSCA)
+        PID05:
+          name: "Description"
+          type: AN
+          min_max: "1/80"
+          usage: mandatory
+      variants:
+        item_description:
+          condition: "PID01=F"
+          turnaround_source: { transaction: "850", segment: "PID" }
+          note: "Echo the PID*F segment exactly as received from the 850"
+        formaldehyde_compliance:
+          condition: "PID01=X"
+          note: "EPA formaldehyde compliance reporting"
+          compliance_codes:
+            - value: "0"
+              desc: "Non-Compliant"
+              code_id: "GM04COMPFE"
+            - value: "1"
+              desc: "Phase 1 Compliant (CARB 2009)"
+              code_id: "GM04COMPFE"
+            - value: "2"
+              desc: "Phase 2 Compliant (CARB 2010)"
+              code_id: "GM04COMPFE"
+            - value: "3"
+              desc: "No Added Formaldehyde"
+              code_id: "GM04COMPFE"
+            - value: "4"
+              desc: "Ultra Low Emission Formaldehyde (ULEF)"
+              code_id: "GM04COMPFE"
+            - value: "5"
+              desc: "TSCA Title VI Compliant"
+              code_id: "GM04COMPTS"
+          dual_compliance_note: >
+            When compliant for both CARB Phase 2 and TSCA, send GM04COMPTS*5
+
+  # ---------------------------------------------------------------------------
+  # SUMMARY SEGMENTS
+  # ---------------------------------------------------------------------------
+  summary:
+
+    TDS:
+      name: "Total Monetary Value Summary"
+      position: 10
+      usage: mandatory
+      max_use: 1
+      elements:
+        TDS01:
+          name: "Amount"
+          type: N2
+          min_max: "1/15"
+          usage: mandatory
+          note: >
+            Total invoice amount due. Includes allowance/charge amounts
+            from SAC but does NOT reflect terms discounts from ITD.
+          validation: "sum(IT1 qty * unit_price) + sum(SAC charges) - sum(SAC allowances)"
+
+    TXI:
+      name: "Tax Information"
+      position: 20
+      usage: conditional
+      max_use: 10
+      condition: "Required for Canada and Mexico transactions"
+      elements:
+        TXI01:
+          name: "Tax Type Code"
+          type: ID
+          min_max: "2/2"
+          usage: mandatory
+          codelist_ref: tax_type
+        TXI02:
+          name: "Monetary Amount"
+          type: R
+          min_max: "1/18"
+          usage: mandatory
+          note: "Max 18 whole number positions, up to 2 decimals"
+        TXI03:
+          name: "Percent (Tax Rate)"
+          type: R
+          min_max: "1/10"
+          usage: conditional
+          condition: "Canada only. Express as: 5 (for 5%), 7.6 (for 7.6%)"
+        TXI04:
+          name: "Tax Jurisdiction Code Qualifier"
+          type: ID
+          min_max: "2/2"
+          usage: conditional
+          condition: "Canada PST only (TXI01=PG). Only value: VD"
+        TXI05:
+          name: "Tax Jurisdiction Code"
+          type: AN
+          min_max: "1/10"
+          usage: conditional
+          condition: "Canada only. 2-char provincial abbreviation."
+        TXI09:
+          name: "Tax Identification Number"
+          type: AN
+          min_max: "1/20"
+          usage: conditional
+          rules:
+            - condition: "TXI01=CG or ZZ"
+              format: "9-digit number"
+            - condition: "TXI01=OH"
+              format: "10-digit number"
+            - condition: "TXI01=PG"
+              format: "15-digit number (optional)"
+
+    CAD:
+      name: "Carrier Detail"
+      position: 30
+      usage: mandatory
+      max_use: 1
+      elements:
+        CAD04:
+          name: "Standard Carrier Alpha Code (SCAC)"
+          type: ID
+          min_max: "2/4"
+          usage: optional
+          turnaround_source: { transaction: "850", segment: "TD5", element: "TD503" }
+          note: "If TD5 present on 850, echo SCAC from TD5-03"
+        CAD05:
+          name: "Routing (Carrier Name)"
+          type: AN
+          min_max: "1/35"
+          usage: optional
+          note: "Name of carrier. Not necessary if SCAC in CAD04."
+      validation: "At least one of CAD04 or CAD05 must be populated"
+
+    SAC:
+      name: "Service, Promotion, Allowance, or Charge Information"
+      position: 40
+      usage: optional
+      max_use: 1
+      loop: SAC
+      max_loop: 25
+      elements:
+        SAC01:
+          name: "Allowance or Charge Indicator"
+          type: ID
+          min_max: "1/1"
+          usage: mandatory
+          codes:
+            A: "Allowance (reduces invoice amount)"
+            C: "Charge (increases invoice amount)"
+        SAC02:
+          name: "Service/Promotion/Allowance/Charge Code"
+          type: ID
+          min_max: "4/4"
+          usage: mandatory
+          codelist_ref: sac_charge_codes
+        SAC05:
+          name: "Amount"
+          type: N2
+          min_max: "1/15"
+          usage: mandatory
+        SAC12:
+          name: "Allowance or Charge Method of Handling Code"
+          type: ID
+          min_max: "2/2"
+          usage: mandatory
+          rules:
+            - "If SAC01=A → SAC12=02 (Off Invoice)"
+            - "If SAC01=C → SAC12=06 (Charge to be Paid by Customer)"
+        SAC15:
+          name: "Description"
+          type: AN
+          min_max: "1/80"
+          usage: mandatory
+      sac_not_echoed_note: >
+        SAC from 850 is NOT automatically returned on the 810.
+        Different code set; different business logic.
+      sos_restrictions:
+        allowed_codes: [C680, G090, H850]
+        note: >
+          For SOS invoices, only these SAC codes are permitted.
+          All other charges should be built into the cost of goods.
+          Other SAC codes will cause the invoice to reject in CommerceHub.
+
+    ISS:
+      name: "Invoice Shipment Summary"
+      position: 60
+      usage: optional
+      max_use: 1
+      loop: ISS
+      elements:
+        ISS01:
+          name: "Number of Units Shipped"
+          type: R
+          min_max: "1/10"
+          usage: mandatory
+        ISS02:
+          name: "Unit or Basis for Measurement Code"
+          type: ID
+          min_max: "2/2"
+          usage: mandatory
+          allowed_codes: [CA, PL, S9]

@@ -1,0 +1,199 @@
+# =============================================================================
+# TURNAROUND MAPPING: 850 Purchase Order → 810 Invoice
+# =============================================================================
+# These rules define which fields from the inbound 850 must be echoed,
+# transformed, or referenced on the outbound 810 invoice.
+#
+# Rule types:
+#   exact_copy    - Echo the value byte-for-byte
+#   transform     - Echo with specific field-level changes
+#   preferred     - Should echo but not all fields strictly required
+#   not_echoed    - Explicitly NOT carried over (new data on 810)
+#   conditional   - Echo depends on presence/value on source
+# =============================================================================
+
+mapping:
+  source: "850"
+  target: "810"
+  description: "PO-to-Invoice turnaround rules per Lowe's spec"
+
+rules:
+
+  # ---------------------------------------------------------------------------
+  # CRITICAL: Purchase Order Number (the thread that ties everything together)
+  # ---------------------------------------------------------------------------
+  - id: po_number
+    name: "Purchase Order Number"
+    priority: critical
+    source:
+      segment: BEG
+      element: BEG03
+    target:
+      segment: BIG
+      element: BIG04
+    rule: exact_copy
+    required: true
+    validation: "BIG04 must exactly match the BEG03 from the originating 850 or BAK03 from the 855"
+
+  # ---------------------------------------------------------------------------
+  # HEADING: Exact echo segments
+  # ---------------------------------------------------------------------------
+  - id: currency
+    name: "Currency Segment"
+    priority: required
+    source:
+      segment: CUR
+      elements: [CUR01, CUR02]
+    target:
+      segment: CUR
+      elements: [CUR01, CUR02]
+    rule: exact_copy
+    required: true
+
+  - id: fob_payment_method
+    name: "FOB Shipment Method of Payment"
+    priority: required
+    source:
+      segment: FOB
+      element: FOB01
+    target:
+      segment: FOB
+      element: FOB01
+    rule: exact_copy
+    required: true
+    note: "Only FOB01 is echoed. FOB02 and FOB03 from 850 are not required on 810."
+
+  # ---------------------------------------------------------------------------
+  # HEADING: N1 Loop (with qualifier transformation)
+  # ---------------------------------------------------------------------------
+  - id: ship_to_store
+    name: "Ship To Location"
+    priority: required
+    source:
+      segment: N1
+      filter: { N101: ST }
+      elements: [N101, N104]
+    target:
+      segment: N1
+      filter: { N101: ST }
+      elements: [N101, N104]
+    rule: transform
+    required: true
+    transforms:
+      N103:
+        from: "93"    # 850 uses "code assigned by originating org"
+        to: "92"      # 810 uses "assigned by buyer or buyer's agent"
+
+  - id: ultimate_destination
+    name: "Ultimate Store Destination (Cross-Dock)"
+    priority: conditional
+    condition: "Present only when 850 contains N1*MA loop"
+    source:
+      segment: N1
+      filter: { N101: MA }
+      elements: [N101, N104]
+    target:
+      segment: N1
+      filter: { N101: MA }
+      elements: [N101, N104]
+    rule: transform
+    transforms:
+      N103:
+        from: "93"
+        to: "92"
+    cross_dock_ordering: >
+      On the 810, if both ST and MA are present, the MA segment
+      MUST come SECOND. If ST is last, the wrong store number is
+      captured and the invoice will be rejected.
+
+  - id: address_echo
+    name: "Address Information"
+    priority: optional
+    source:
+      segment: N3
+      elements: [N301, N302]
+    target:
+      segment: N3
+      elements: [N301, N302]
+    rule: exact_copy
+
+  - id: geo_location_echo
+    name: "Geographic Location"
+    priority: optional
+    source:
+      segment: N4
+      elements: [N401, N402, N403, N404]
+    target:
+      segment: N4
+      elements: [N401, N402, N403, N404]
+    rule: exact_copy
+
+  # ---------------------------------------------------------------------------
+  # HEADING: Fields that are NOT echoed (different data on 810)
+  # ---------------------------------------------------------------------------
+  - id: dtm_not_echoed
+    name: "Date/Time Reference"
+    rule: not_echoed
+    note: >
+      DTM qualifiers change between 850 and 810.
+      850: DTM*002 (Delivery Requested), DTM*010 (Requested Ship)
+      810: DTM*011 (Shipped), DTM*008 (Purchase Order Received)
+      Vendor must populate 810 DTM with actual ship/received dates.
+
+  - id: sac_not_echoed
+    name: "SAC Allowance/Charge"
+    rule: not_echoed
+    note: >
+      850 SAC (e.g., E740 New Store Allowance) is NOT returned on the 810.
+      810 SAC uses a completely different code set for freight, handling, etc.
+
+  # ---------------------------------------------------------------------------
+  # DETAIL: Line Item Data
+  # ---------------------------------------------------------------------------
+  - id: line_items
+    name: "Baseline Item Data"
+    priority: required
+    source:
+      segment: PO1
+      loop: PO1
+      elements: [PO101, PO102, PO103, PO104, PO105, PO106, PO107, PO108, PO109]
+    target:
+      segment: IT1
+      loop: IT1
+      elements: [IT101, IT102, IT103, IT104, "--", IT106, IT107, IT108, IT109]
+    rule: preferred
+    strictly_required_target_fields: [IT101, IT102, IT103, IT104, IT106, IT107]
+    note: >
+      Prefer echoing all PO1 fields. Only the first 7 target fields are mandatory.
+      Use Lowe's SKU (IT107) as-is from the PO. Invoice using Lowe's item number,
+      not vendor model number, especially for multi-country items.
+
+  - id: item_description_echo
+    name: "Product/Item Description"
+    priority: required
+    source:
+      segment: PID
+      filter: { PID01: F }
+    target:
+      segment: PID
+      filter: { PID01: F }
+    rule: exact_copy
+    note: "Echo PID*F (free-form description) exactly as received from the 850"
+
+  # ---------------------------------------------------------------------------
+  # DETAIL: Carrier turnaround (conditional)
+  # ---------------------------------------------------------------------------
+  - id: carrier_scac
+    name: "Carrier SCAC Code"
+    priority: conditional
+    condition: "If TD5 segment present on 850"
+    source:
+      segment: TD5
+      element: TD503
+    target:
+      segment: CAD
+      element: CAD04
+    rule: exact_copy
+    fallback: >
+      If TD5 not present on 850, vendor must still supply either
+      SCAC in CAD04 or carrier name in CAD05 on the 810.

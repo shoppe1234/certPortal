@@ -1,0 +1,151 @@
+# =============================================================================
+# TURNAROUND MAPPING: 850 Purchase Order → 855 PO Acknowledgment
+# =============================================================================
+# When the 855 is used to ACKNOWLEDGE a Lowe's-originated 850 (rather than
+# as a vendor-initiated reverse PO), these fields must carry over.
+# =============================================================================
+
+mapping:
+  source: "850"
+  target: "855"
+  description: "PO-to-Acknowledgment turnaround rules"
+  context: >
+    These rules apply when the 855 is acknowledging/changing/cancelling
+    a Lowe's-originated 850. When the 855 is a vendor-initiated reverse PO,
+    the PO number comes from LowesLink reservation, not from an 850.
+
+rules:
+
+  - id: po_number
+    name: "Purchase Order Number"
+    priority: critical
+    source:
+      segment: BEG
+      element: BEG03
+    target:
+      segment: BAK
+      element: BAK03
+    rule: exact_copy
+    required: true
+    change_restriction: "PO number CANNOT be changed on 855 change/cancel"
+    note: "Must match exactly; zero-suppressed, no spaces"
+
+  - id: rp_reference
+    name: "Replenishment Program Reference Number"
+    priority: required
+    source:
+      segment: REF
+      filter: { REF01: WO }
+      element: REF02
+    target:
+      segment: REF
+      filter: { REF01: WO }
+      element: REF02
+    rule: exact_copy
+    required: true
+    change_restriction: "Reference number CANNOT be changed"
+    validation: >
+      Order cannot be processed without correct RP reference number.
+      If invalid RP ref sent, must resend as original (not change)
+      with correct ref number.
+
+  - id: truck_load_number
+    name: "VPXD Truck Load Number"
+    priority: conditional
+    condition: "Present only for VPXD cross-dock orders"
+    source:
+      segment: REF
+      filter: { REF01: AN }
+      element: REF02
+    target:
+      segment: REF
+      filter: { REF01: AN }
+      element: REF02
+    rule: exact_copy
+    change_restriction: "Truck Load Number CANNOT be changed"
+
+  - id: ship_to_location
+    name: "Ship To Location"
+    priority: required
+    source:
+      segment: N1
+      filter: { N101: ST }
+      element: N104
+    target:
+      segment: N1
+      filter: { N101: ST }
+      element: N104
+    rule: transform
+    transforms:
+      N103:
+        from: "93"    # 850 uses qualifier 93
+        to: "94"      # 855 uses qualifier 94
+    change_restriction: "Store number CANNOT be changed"
+
+  - id: cross_dock_destination
+    name: "Cross-Dock Ultimate Destination"
+    priority: conditional
+    condition: "Present only on cross-dock orders"
+    source:
+      segment: N1
+      filter: { N101: MA }
+      element: N104
+    target:
+      segment: N1
+      filter: { N101: MA }
+      element: N104
+    rule: transform
+    transforms:
+      N103:
+        from: "93"
+        to: "94"
+    note: "Cross-dock location CAN be changed (must be valid DC)"
+
+  - id: line_items
+    name: "Baseline Item Data"
+    priority: required
+    source:
+      segment: PO1
+      elements: [PO102, PO103, PO106, PO107]
+    target:
+      segment: PO1
+      elements: [PO102, PO103, PO106, PO107]
+    rule: exact_copy
+    note: >
+      For changes (BAK01=05), ALL items must be included as the change
+      fully replaces the original PO. Lowe's accepts either Lowe's item
+      number (CB) or UPC (UP).
+
+  - id: item_price
+    name: "Unit Price"
+    priority: informational
+    source:
+      segment: PO1
+      element: PO104
+    target:
+      segment: PO1
+      element: PO104
+    rule: optional
+    change_restriction: "Item price CANNOT be changed on the 855"
+    note: >
+      Even if sent on the 855, Lowe's does NOT use the vendor's price.
+      Lowe's uses the cost from the Merchant Program (MP).
+
+  # ---------------------------------------------------------------------------
+  # FIELDS NOT CARRIED OVER
+  # ---------------------------------------------------------------------------
+  - id: dtm_not_echoed
+    name: "Date/Time Reference"
+    rule: not_echoed
+    note: >
+      850 uses DTM*002 (Delivery Requested) and DTM*010 (Requested Ship).
+      855 uses DTM*067 (Current Schedule Delivery) and DTM*068 (Current Schedule Ship).
+      Vendor provides new dates; these are not echoed from 850.
+
+  - id: per_not_echoed
+    name: "Administrative Contact"
+    rule: not_echoed
+    note: >
+      850 PER uses BD (Buyer) and DC (Delivery Contact).
+      855 PER uses OC (Order Contact) — the person at the store or
+      vendor who placed or is modifying the order.

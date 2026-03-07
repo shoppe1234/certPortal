@@ -1,0 +1,488 @@
+# =============================================================================
+# 860 PURCHASE ORDER CHANGE REQUEST (BUYER INITIATED) - Lowe's → Vendor (Inbound)
+# =============================================================================
+# Version: 004010 | Modified: 2026-02-17
+# Functional Group: PC
+# Direction: Inbound (Lowe's sends to Vendor)
+#
+# The 860 is used by Lowe's to change or cancel a previously submitted 850
+# Purchase Order. It references the original PO number in BCH03 and uses
+# POC (Line Item Change) segments instead of PO1.
+#
+# The PO number (BCH03) must align with:
+#   - BEG03 from the originating 850
+#   - BAK03 on any prior 855 acknowledgment
+#   - BIG04 on the subsequent 810 invoice
+#
+# The vendor's response to an 860 is the 865 PO Change Acknowledgment.
+# =============================================================================
+
+transaction:
+  id: "860"
+  name: "Purchase Order Change Request - Buyer Initiated"
+  functional_group: "PC"
+  direction: inbound
+  version: "004010"
+
+  shared_refs:
+    envelope: shared/envelope.yaml
+    common: shared/common_segments.yaml
+    codelists: shared/codelists.yaml
+
+  # ---------------------------------------------------------------------------
+  # ENVELOPE OVERRIDES (860-specific)
+  # ---------------------------------------------------------------------------
+  envelope_overrides:
+    GS:
+      GS01: { fixed_value: "PC" }
+    ST:
+      ST01: { fixed_value: "860" }
+
+  # ---------------------------------------------------------------------------
+  # HEADING SEGMENTS
+  # ---------------------------------------------------------------------------
+  heading:
+
+    BCH:
+      name: "Beginning Segment for Purchase Order Change"
+      position: 20
+      usage: mandatory
+      max_use: 1
+      elements:
+        BCH01:
+          name: "Transaction Set Purpose Code"
+          type: ID
+          min_max: "2/2"
+          usage: mandatory
+          allowed_codes: ["01", "05"]
+          business_rules:
+            - code: "01"
+              meaning: "Cancellation — cancel the entire PO"
+            - code: "05"
+              meaning: "Replace — sends complete replacement of the PO"
+        BCH02:
+          name: "Purchase Order Type Code"
+          type: ID
+          min_max: "2/2"
+          usage: mandatory
+          fixed_value: "CP"
+          note: "Always 'CP' (Change to Purchase Order)"
+        BCH03:
+          name: "Purchase Order Number"
+          type: AN
+          min_max: "1/22"
+          usage: mandatory
+          constraints:
+            max_digits: 9
+            format: "zero-suppressed"
+          source:
+            primary: { transaction: "850", segment: "BEG", element: "BEG03" }
+          turnaround:
+            echoes_to:
+              - { transaction: "865", segment: "BCA", element: "BCA03" }
+              - { transaction: "810", segment: "BIG", element: "BIG04" }
+          note: "Must match BEG03 from the originating 850"
+        BCH06:
+          name: "Date"
+          type: DT
+          min_max: "8/8"
+          usage: mandatory
+          format: "CCYYMMDD"
+          note: "Date assigned by Lowe's to the purchase order"
+        BCH10:
+          name: "Date"
+          type: DT
+          min_max: "8/8"
+          usage: optional
+          format: "CCYYMMDD"
+          note: "Date assigned by the sender to the acknowledgment"
+
+    CUR:
+      name: "Currency"
+      position: 40
+      usage: optional
+      max_use: 1
+      turnaround:
+        echo_rule: exact_copy
+        note: "Echo CUR from originating 850"
+      elements:
+        CUR01:
+          name: "Entity Identifier Code"
+          type: ID
+          min_max: "2/3"
+          usage: mandatory
+          fixed_value: "SE"
+        CUR02:
+          name: "Currency Code"
+          type: ID
+          min_max: "3/3"
+          usage: mandatory
+          codelist_ref: currency_code
+
+    REF:
+      name: "Reference Identification"
+      position: 50
+      usage: optional
+      max_use: ">1"
+      elements:
+        REF01:
+          name: "Reference Identification Qualifier"
+          type: ID
+          min_max: "2/3"
+          usage: mandatory
+          allowed_codes: [DP, IA, WO]
+        REF02:
+          name: "Reference Identification"
+          type: AN
+          min_max: "1/30"
+          usage: mandatory
+        REF03:
+          name: "Description"
+          type: AN
+          min_max: "1/80"
+          usage: conditional
+          condition: "Present when REF01=DP (department name abbreviation)"
+      instances:
+        - qualifier: IA
+          description: "Internal Vendor Number"
+          required: false
+          turnaround:
+            source: { transaction: "850", segment: "REF", qualifier: "IA" }
+            rule: exact_copy
+        - qualifier: WO
+          description: "Replenishment Program (RP) Reference Number"
+          required: false
+          turnaround:
+            source: { transaction: "850", segment: "REF", qualifier: "WO" }
+            rule: exact_copy
+        - qualifier: DP
+          description: "Department Number"
+          required: false
+
+    PER:
+      name: "Administrative Communications Contact"
+      position: 60
+      usage: optional
+      max_use: 3
+      elements:
+        PER01:
+          name: "Contact Function Code"
+          type: ID
+          min_max: "2/2"
+          usage: mandatory
+          fixed_value: "BD"
+          note: "Buyer Name or Department"
+        PER02:
+          name: "Name"
+          type: AN
+          min_max: "1/60"
+          usage: optional
+        PER03:
+          name: "Communication Number Qualifier"
+          type: ID
+          min_max: "2/2"
+          usage: optional
+          allowed_codes: [TE]
+        PER04:
+          name: "Communication Number"
+          type: AN
+          min_max: "1/80"
+          usage: optional
+
+    FOB:
+      name: "F.O.B. Related Instructions"
+      position: 80
+      usage: optional
+      max_use: ">1"
+      elements:
+        FOB01:
+          name: "Shipment Method of Payment"
+          type: ID
+          min_max: "2/2"
+          usage: mandatory
+          allowed_codes: [CC, PP]
+          note: "860 only supports Collect and Prepaid (same as 855; CF and PC not valid)"
+
+    SAC:
+      name: "Service, Promotion, Allowance, or Charge Information"
+      position: 120
+      usage: optional
+      max_use: 1
+      loop: SAC
+      max_loop: 25
+      elements:
+        SAC01:
+          name: "Allowance or Charge Indicator"
+          type: ID
+          min_max: "1/1"
+          usage: mandatory
+          allowed_codes: [R]
+          note: "R = Allowance Request"
+        SAC02:
+          name: "Service/Promotion/Allowance/Charge Code"
+          type: ID
+          min_max: "4/4"
+          usage: mandatory
+          allowed_codes: [E740]
+          note: "New Store Allowance — same as 850"
+
+    DTM:
+      name: "Date/Time Reference"
+      position: 150
+      usage: optional
+      max_use: 10
+      elements:
+        DTM01:
+          name: "Date/Time Qualifier"
+          type: ID
+          min_max: "3/3"
+          usage: mandatory
+          allowed_codes: ["002", "010"]
+        DTM02:
+          name: "Date"
+          type: DT
+          min_max: "8/8"
+          usage: mandatory
+          format: "CCYYMMDD"
+      instances:
+        - qualifier: "002"
+          description: "Delivery Requested"
+          required: false
+        - qualifier: "010"
+          description: "Requested Ship"
+          required: false
+      note: "Same qualifiers as the 850. These may carry updated dates from the original PO."
+
+    CTB:
+      name: "Restrictions/Conditions"
+      position: 267
+      usage: optional
+      max_use: ">1"
+      elements:
+        CTB01:
+          name: "Restrictions/Conditions Qualifier"
+          type: ID
+          min_max: "2/2"
+          usage: mandatory
+          allowed_codes: [OR]
+        CTB02:
+          name: "Description"
+          type: AN
+          min_max: "1/80"
+          usage: optional
+
+    N1_loop:
+      name: "Name Loop"
+      position: 300
+      usage: optional
+      max_loop: 200
+      overrides:
+        N103:
+          fixed_value: "93"
+          note: "860 uses qualifier 93 (same as 850)"
+      elements:
+        N101:
+          name: "Entity Identifier Code"
+          type: ID
+          min_max: "2/3"
+          usage: mandatory
+          allowed_codes: [ST, MA]
+        N102:
+          name: "Name"
+          type: AN
+          min_max: "1/60"
+          usage: optional
+        N103:
+          name: "Identification Code Qualifier"
+          type: ID
+          min_max: "1/2"
+          usage: mandatory
+          fixed_value: "93"
+        N104:
+          name: "Identification Code"
+          type: AN
+          min_max: "2/80"
+          usage: mandatory
+      instances:
+        - qualifier_N101: ST
+          description: "Ship To (store or distribution center)"
+          required: false
+          turnaround:
+            source: { transaction: "850", segment: "N1", qualifier: "ST", element: "N104" }
+            rule: exact_copy
+        - qualifier_N101: MA
+          description: "Ultimate store destination (cross-dock only)"
+          required: false
+          condition: "Present only on cross-dock orders"
+          turnaround:
+            source: { transaction: "850", segment: "N1", qualifier: "MA", element: "N104" }
+            rule: exact_copy
+
+    N3:
+      name: "Address Information"
+      position: 320
+      usage: optional
+      max_use: 2
+
+    N4:
+      name: "Geographic Location"
+      position: 330
+      usage: optional
+      max_use: ">1"
+      elements:
+        N401:
+          name: "City Name"
+          type: AN
+          min_max: "2/30"
+          usage: optional
+        N402:
+          name: "State or Province Code"
+          type: ID
+          min_max: "2/2"
+          usage: optional
+        N403:
+          name: "Postal Code"
+          type: ID
+          min_max: "3/15"
+          usage: optional
+
+  # ---------------------------------------------------------------------------
+  # DETAIL SEGMENTS
+  # ---------------------------------------------------------------------------
+  detail:
+
+    POC:
+      name: "Line Item Change"
+      position: 10
+      usage: optional
+      max_use: 1
+      loop: POC
+      max_loop: ">1"
+      note: >
+        The 860 uses POC segments instead of PO1. Each POC specifies
+        whether the line is unchanged (NC) or fully replaced (RZ).
+      elements:
+        POC01:
+          name: "Assigned Identification"
+          type: AN
+          min_max: "1/20"
+          usage: optional
+          note: "Purchase order line item identification"
+        POC02:
+          name: "Change or Response Type Code"
+          type: ID
+          min_max: "2/2"
+          usage: mandatory
+          allowed_codes: [NC, RZ]
+          business_rules:
+            - code: NC
+              meaning: "Concurrent Item (No Change) — line item remains as-is"
+            - code: RZ
+              meaning: "Replace All Values — line item is fully replaced with new data"
+        POC03:
+          name: "Quantity Ordered"
+          type: R
+          min_max: "1/15"
+          usage: conditional
+          condition: "Required when POC02=RZ"
+        POC04:
+          name: "Quantity Left to Receive"
+          type: R
+          min_max: "1/9"
+          usage: conditional
+          condition: "Required if POC03 is present"
+        POC05:
+          name: "Composite Unit of Measure"
+          type: Comp
+          usage: conditional
+          condition: "Required if POC03 is present"
+          sub_elements:
+            POC05_01:
+              name: "Unit or Basis for Measurement Code"
+              type: ID
+              min_max: "2/2"
+              usage: mandatory
+              codelist_ref: unit_of_measure
+        POC06:
+          name: "Unit Price"
+          type: R
+          min_max: "1/17"
+          usage: optional
+        POC08:
+          name: "Product/Service ID Qualifier"
+          type: ID
+          min_max: "2/2"
+          usage: conditional
+          allowed_codes: [CB]
+          note: "Buyer's Catalog Number (Lowe's SKU)"
+        POC09:
+          name: "Product/Service ID"
+          type: AN
+          min_max: "1/48"
+          usage: conditional
+          note: "Lowe's item number"
+      business_rules:
+        - >
+          When BCH01=05 (Replace), ALL line items must be included —
+          both changed (RZ) and unchanged (NC) lines. This is a full
+          replacement of the PO, not a delta.
+
+    PID:
+      name: "Product/Item Description"
+      position: 50
+      usage: optional
+      max_use: 1
+      loop: PID
+      max_loop: 1000
+      elements:
+        PID01:
+          name: "Item Description Type"
+          type: ID
+          min_max: "1/1"
+          usage: mandatory
+          fixed_value: "F"
+          note: "Free-form description"
+        PID05:
+          name: "Description"
+          type: AN
+          min_max: "1/80"
+          usage: mandatory
+
+  # ---------------------------------------------------------------------------
+  # SUMMARY SEGMENTS
+  # ---------------------------------------------------------------------------
+  summary:
+
+    CTT:
+      name: "Transaction Totals"
+      position: 10
+      usage: optional
+      max_use: 1
+      elements:
+        CTT01:
+          name: "Number of Line Items"
+          type: N0
+          min_max: "1/6"
+          usage: mandatory
+          computed: "Count of POC segments"
+        CTT02:
+          name: "Hash Total"
+          type: R
+          min_max: "1/10"
+          usage: optional
+          computed: "Sum of POC03 (Quantity Ordered) across all POC segments"
+
+  # ---------------------------------------------------------------------------
+  # RELATIONSHIP TO OTHER DOCUMENTS
+  # ---------------------------------------------------------------------------
+  relationships:
+    originates_from: "850"
+    response_document: "865"
+    response_note: >
+      The vendor responds to an 860 with an 865 PO Change Acknowledgment.
+      The 865 echoes BCH03 (PO number) in BCA03 and indicates acceptance
+      (BCA02=AT) or rejection (BCA02=RJ).
+    lifecycle_impact: >
+      The 860 modifies the active PO in the lifecycle. After the vendor
+      acknowledges via 865, the updated PO data governs subsequent 856 ASN
+      and 810 invoice generation.

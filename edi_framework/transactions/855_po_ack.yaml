@@ -1,0 +1,396 @@
+# =============================================================================
+# 855 PURCHASE ORDER ACKNOWLEDGMENT / REVERSE PO - Vendor → Lowe's (Outbound)
+# =============================================================================
+# Version: 004010 | Modified: 2025-10-23
+# Functional Group: PR
+# Direction: Outbound (Vendor sends to Lowe's)
+#
+# The 855 serves dual purposes:
+#   1. PO Acknowledgment: vendor confirms/changes/cancels a Lowe's-originated 850
+#   2. Reverse Purchase Order: VMI vendor creates a new PO for Lowe's locations
+#
+# The PO number (BAK03) must align with:
+#   - BEG03 from the originating 850 (if acknowledging)
+#   - A reserved PO number from LowesLink (if reverse PO)
+#   - BIG04 on the subsequent 810 invoice
+# =============================================================================
+
+transaction:
+  id: "855"
+  name: "Purchase Order Acknowledgment"
+  functional_group: "PR"
+  direction: outbound
+  version: "004010"
+
+  shared_refs:
+    envelope: shared/envelope.yaml
+    common: shared/common_segments.yaml
+    codelists: shared/codelists.yaml
+
+  # ---------------------------------------------------------------------------
+  # ENVELOPE OVERRIDES
+  # ---------------------------------------------------------------------------
+  envelope_overrides:
+    ISA:
+      ISA07: { fixed_value: "01" }          # Lowe's qualifier is DUNS
+      ISA08: { fixed_value: "006097142" }   # Lowe's receiver ID (test & prod)
+    GS:
+      GS01: { fixed_value: "PR" }
+      GS03: { fixed_value: "006097142" }
+    ST:
+      ST01: { fixed_value: "855" }
+
+  # ---------------------------------------------------------------------------
+  # PROCESSING RULES
+  # ---------------------------------------------------------------------------
+  processing:
+    schedule: "6:30 PM ET Monday–Saturday. No Sunday processing."
+    order_of_operations:
+      - "Originals processed first"
+      - "Changes and Voids processed second"
+    implications:
+      - "Original + Change same day → PO posted with Change data"
+      - "Original + Cancel + re-Original same day → PO cancelled, NOT re-posted"
+    reconciliation: >
+      Lowe's does NOT monitor inbound control numbers.
+      Reconcile outbound 855s against inbound 997s from Lowe's.
+      No 997 received = Lowe's did not receive the 855.
+
+  # ---------------------------------------------------------------------------
+  # HEADING SEGMENTS
+  # ---------------------------------------------------------------------------
+  heading:
+
+    BAK:
+      name: "Beginning Segment for Purchase Order Acknowledgment"
+      position: 20
+      usage: mandatory
+      max_use: 1
+      elements:
+        BAK01:
+          name: "Transaction Set Purpose Code"
+          type: ID
+          min_max: "2/2"
+          usage: mandatory
+          codelist_ref: po_ack_purpose
+          allowed_codes: ["00", "01", "05", "06"]
+          business_rules:
+            - code: "00"
+              meaning: "Original - new reverse PO or initial ack"
+            - code: "01"
+              meaning: "Cancellation - pre-approved vendors only"
+            - code: "05"
+              meaning: "Replace - sends complete replacement; ALL items must be included"
+            - code: "06"
+              meaning: "Confirmation"
+        BAK02:
+          name: "Acknowledgment Type"
+          type: ID
+          min_max: "2/2"
+          usage: mandatory
+          codelist_ref: po_ack_type
+          allowed_codes: [AC, AD, RJ]
+          business_rules:
+            - code: AC
+              meaning: "Acknowledge with detail and change"
+            - code: AD
+              meaning: "Acknowledge with detail, no change - item or date change expected"
+            - code: RJ
+              meaning: "Rejected purchase order - no detail needed"
+        BAK03:
+          name: "Purchase Order Number"
+          type: AN
+          min_max: "1/22"
+          usage: mandatory
+          constraints:
+            max_digits: 9
+            format: "zero-suppressed, no spaces"
+          source_options:
+            - origin: "850"
+              field: "BEG03"
+              context: "When acknowledging a Lowe's-originated PO"
+            - origin: "LowesLink PO Reservation"
+              context: "When creating a vendor-initiated reverse PO"
+          turnaround:
+            echoes_to:
+              - { transaction: "810", segment: "BIG", element: "BIG04" }
+          uniqueness_rule: >
+            Unique PO numbers required for reverse POs.
+            Reserve via LowesLink application.
+        BAK04:
+          name: "Date"
+          type: DT
+          min_max: "8/8"
+          usage: mandatory
+          format: "CCYYMMDD"
+
+    REF:
+      name: "Reference Identification"
+      position: 50
+      usage: mandatory
+      max_use: ">1"
+      elements:
+        REF01:
+          name: "Reference Identification Qualifier"
+          type: ID
+          min_max: "2/3"
+          usage: mandatory
+          allowed_codes: [WO, AN]
+        REF02:
+          name: "Reference Identification"
+          type: AN
+          min_max: "1/30"
+          usage: mandatory
+      instances:
+        - qualifier: WO
+          description: "Replenishment Program (RP) Reference Number"
+          required: true
+          note: >
+            5-digit internal RP reference number provided by Lowe's Merchandising.
+            Can vary by store/item combination and can change periodically.
+            Order CANNOT be processed without correct RP reference number.
+          validation_rule: >
+            If invalid RP ref sent on original, must resend as original (not change)
+            with correct ref. No cancellation needed for the rejected original.
+        - qualifier: AN
+          description: "VPXD Cross-Dock Truck Load Number"
+          required: false
+          condition: "Present only for VPXD cross-dock orders"
+          constraints:
+            max_digits: 9
+            format: "leading zeros suppressed"
+          note: >
+            All VPXD orders on the same truck share the same Truck Load Number,
+            which is the PO number from any VPXD order on the truck.
+          change_restriction: "Cannot be changed after original submission"
+
+    PER:
+      name: "Administrative Communications Contact"
+      position: 60
+      usage: mandatory
+      max_use: 3
+      elements:
+        PER01:
+          name: "Contact Function Code"
+          type: ID
+          min_max: "2/2"
+          usage: mandatory
+          fixed_value: "OC"           # Order Contact
+        PER02:
+          name: "Name"
+          type: AN
+          min_max: "1/60"
+          usage: mandatory
+          note: >
+            For originals: name of individual at store who placed the order.
+            For changes: name of vendor contact requesting the change.
+
+    FOB:
+      name: "F.O.B. Related Instructions"
+      position: 80
+      usage: mandatory
+      max_use: ">1"
+      overrides:
+        FOB01:
+          allowed_codes: [CC, PP]     # 855 only supports Collect and Prepaid
+          note: "CF and PC are NOT valid on the 855 (unlike 850 and 810)"
+
+    DTM:
+      name: "Date/Time Reference"
+      position: 150
+      usage: mandatory
+      max_use: 10
+      elements:
+        DTM01:
+          name: "Date/Time Qualifier"
+          type: ID
+          min_max: "3/3"
+          usage: mandatory
+          allowed_codes: ["010", "067", "068"]
+        DTM02:
+          name: "Date"
+          type: DT
+          min_max: "8/8"
+          usage: mandatory
+          format: "CCYYMMDD"
+      instances:
+        - qualifier: "067"
+          description: "Current Schedule Delivery"
+          required: true
+        - qualifier: "068"
+          description: "Current Schedule Ship"
+          required: true
+        - qualifier: "010"
+          description: "Requested Ship (delayed)"
+          required: false
+          condition: "Only when BAK02=AC (acknowledging with change)"
+          note: "Used to communicate that ship date will be delayed"
+      change_constraints:
+        arrival_date:
+          window: "between 30 days ago and 1 year from today"
+        ship_date:
+          window: "between 30 days ago and 1 year from today"
+
+    N1_loop:
+      name: "Name Loop"
+      position: 300
+      usage: mandatory
+      max_loop: 200
+      overrides:
+        N102:
+          usage: not_used
+          note: "Leave blank for Lowe's locations"
+        N103:
+          fixed_value: "94"
+          note: "855 uses qualifier 94 (differs from 850's 93 and 810's 92)"
+        N104:
+          note: >
+            Store or DC number. Single-digit stores: one leading zero (e.g., 02).
+            All other stores: actual number (e.g., 23, 302, 1066).
+      instances:
+        - qualifier_N101: ST
+          description: "Ship To (store or distribution center)"
+          required: true
+          change_restriction: "Store number CANNOT be changed after original"
+        - qualifier_N101: MA
+          description: "Ultimate store destination (cross-dock only)"
+          required: false
+          condition: "Present only for cross-dock orders"
+          note: "Invoice must be for this MA store, not the ST distribution center"
+
+  # ---------------------------------------------------------------------------
+  # DETAIL SEGMENTS
+  # ---------------------------------------------------------------------------
+  detail:
+
+    PO1:
+      name: "Baseline Item Data"
+      position: 10
+      usage: mandatory
+      max_use: 1
+      loop: PO1
+      max_loop: 100000
+      elements:
+        PO101:
+          name: "Assigned Identification"
+          type: AN
+          min_max: "1/20"
+          usage: not_used
+        PO102:
+          name: "Quantity Ordered"
+          type: R
+          min_max: "1/15"
+          usage: mandatory
+        PO103:
+          name: "Unit or Basis for Measurement Code"
+          type: ID
+          min_max: "2/2"
+          usage: mandatory
+        PO104:
+          name: "Unit Price"
+          type: R
+          min_max: "1/17"
+          usage: optional
+          note: >
+            If sent, it is NOT used by Lowe's. Lowe's uses the cost
+            from the Merchant Program (MP) maintained by the Merchandising Assistant.
+          format_note: "Send with decimal only when needed: 15.95 not 15.9500, 29 not 29.00"
+        PO106:
+          name: "Product/Service ID Qualifier"
+          type: ID
+          min_max: "2/2"
+          usage: mandatory
+          allowed_codes: [CB, UP]
+        PO107:
+          name: "Product/Service ID"
+          type: AN
+          min_max: "1/48"
+          usage: mandatory
+          note: "Lowe's item number (CB) or UPC number (UP)"
+        PO108:
+          name: "Product/Service ID Qualifier (secondary)"
+          type: ID
+          min_max: "2/2"
+          usage: mandatory
+      summarization_rule: >
+        Lowe's will summarize when:
+        - Same item number reported multiple times on a PO
+        - Multiple UPCs submitted that are linked to the same item number
+        Quantities will be totaled into a single line item.
+
+    ACK:
+      name: "Line Item Acknowledgment"
+      position: 270
+      usage: mandatory
+      max_use: 1
+      loop: ACK
+      max_loop: 104
+      elements:
+        ACK01:
+          name: "Line Item Status Code"
+          type: ID
+          min_max: "2/2"
+          usage: conditional
+          codelist_ref: line_item_status
+          allowed_codes: [IA, IQ, ID]
+          business_rules:
+            - code: IA
+              meaning: "Item Accepted - full quantity"
+              ack_qty: "matches PO1 qty"
+            - code: IQ
+              meaning: "Item Accepted - Quantity Changed"
+              ack_qty: "reduced from PO1 qty"
+            - code: ID
+              meaning: "Item Deleted - cannot be shipped"
+              ack_qty: 0
+        ACK02:
+          name: "Quantity"
+          type: R
+          min_max: "1/15"
+          usage: mandatory
+          note: "Quantity that CAN be shipped"
+        ACK03:
+          name: "Unit or Basis for Measurement Code"
+          type: ID
+          min_max: "2/2"
+          usage: mandatory
+          note: "Must match PO1 segment UOM"
+        ACK07:
+          name: "Product/Service ID Qualifier"
+          type: ID
+          min_max: "2/2"
+          usage: mandatory
+          fixed_value: "CB"
+        ACK08:
+          name: "Product/Service ID"
+          type: AN
+          min_max: "1/48"
+          usage: mandatory
+
+  # ---------------------------------------------------------------------------
+  # CHANGE/CANCEL BUSINESS RULES
+  # ---------------------------------------------------------------------------
+  change_cancel_rules:
+    preconditions:
+      - "Only pre-approved vendors may send changes (BAK01=05) or cancellations (BAK01=01)"
+      - "Cannot modify a PO that has been vouchered, invoiced, cancelled, or received"
+      - "Cannot modify SOS (Special Order) Purchase Orders"
+    allowed_changes:
+      - "Add or Delete SKU(s)"
+      - "Change SKU quantities"
+      - "Change Arrival Date (within 30 days ago to 1 year out)"
+      - "Change Ship Date (within 30 days ago to 1 year out)"
+      - "Change cross-dock location (must be valid DC)"
+      - "Void the Purchase Order"
+    prohibited_changes:
+      - "Store Number"
+      - "Purchase Order Number"
+      - "Item Price"
+      - "Reference Number (RP)"
+      - "Truck Load Number (VPXD)"
+    replacement_rule: >
+      When sending a change (BAK01=05), ALL items must be included
+      in the replacement — it fully replaces the original PO.
+    multiple_changes: >
+      Vendor may submit multiple changes to the same PO before it has
+      been vouchered, invoiced, cancelled, or received at the Lowe's location.
