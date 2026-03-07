@@ -1,15 +1,19 @@
 """
-testing/suites/suite_a.py — Portal Auth Tests (ADR-014).
+testing/suites/suite_a.py — Portal Auth Tests (ADR-014, ADR-015).
 
 Tests certportal.core.auth: token creation/decoding, get_current_user dependency,
-require_role factory, authenticate_user, and _DEV_USERS structure.
+require_role factory, authenticate_user (DB path + _DEV_USERS fallback), and
+_DEV_USERS bcrypt hash structure.
 
-No live DB, S3, or network required — all auth logic is pure in-process.
+No live DB, S3, or network required — DB calls are mocked in test_11; tests
+09 and 10 use the _DEV_USERS bcrypt fallback path naturally when no DB is
+reachable in the test runner.
 
 Architecture coverage:
   ADR-014 — JWT HS256 via python-jose, httponly cookie + Bearer header dual-accept
+  ADR-015 — DB-backed auth (portal_users table + bcrypt), _DEV_USERS fallback
   certportal.core.auth — create_access_token, decode_token, get_current_user,
-                         require_role, authenticate_user, build_token_claims
+                         require_role, authenticate_user (async), build_token_claims
 """
 from __future__ import annotations
 
@@ -41,6 +45,7 @@ try:
         authenticate_user,
         build_token_claims,
         _DEV_USERS,
+        _verify_password,
         ACCESS_TOKEN_EXPIRE_MINUTES,
     )
     from fastapi import HTTPException
@@ -242,37 +247,44 @@ def _test_08_require_role_fail() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Test 09: authenticate_user — valid and invalid credentials
+# Test 09: authenticate_user — _DEV_USERS fallback path (no live DB)
 # ---------------------------------------------------------------------------
 
-def _test_09_authenticate_user() -> None:
-    """authenticate_user returns user dict on valid creds, None on bad password."""
+def _test_09_authenticate_user_dev_fallback() -> None:
+    """authenticate_user returns user dict via _DEV_USERS fallback when DB is unreachable.
+
+    In CI / dev without a running Postgres, the DB connection attempt raises
+    an exception; authenticate_user catches it and falls back to _DEV_USERS
+    bcrypt verification — so valid creds return a user record and invalid creds
+    return None, with no live DB required.
+    """
     assert _AUTH_OK, f"auth import failed: {_IMPORT_ERRORS}"
 
-    # Valid credentials
-    user = authenticate_user("pam_admin", "certportal_admin")
+    # Valid credentials — falls back to _DEV_USERS bcrypt verification
+    user = _run_async(authenticate_user("pam_admin", "certportal_admin"))
     assert user is not None, "Expected user dict for valid credentials, got None"
     assert user["sub"] == "pam_admin"
     assert user["role"] == "admin"
+    assert user.get("retailer_slug") is None
 
     # Wrong password
-    bad = authenticate_user("pam_admin", "wrong_password")
+    bad = _run_async(authenticate_user("pam_admin", "wrong_password"))
     assert bad is None, f"Expected None for wrong password, got: {bad}"
 
     # Non-existent user
-    nonexistent = authenticate_user("nobody", "certportal_admin")
+    nonexistent = _run_async(authenticate_user("nobody", "certportal_admin"))
     assert nonexistent is None, f"Expected None for unknown user, got: {nonexistent}"
 
 
 # ---------------------------------------------------------------------------
-# Test 10: _DEV_USERS structure — 3 users with required keys
+# Test 10: _DEV_USERS structure — 3 users with bcrypt hashed passwords
 # ---------------------------------------------------------------------------
 
 def _test_10_dev_users_structure() -> None:
-    """_DEV_USERS has exactly 3 users (admin, retailer, supplier) with required keys."""
+    """_DEV_USERS has exactly 3 users (admin, retailer, supplier) with bcrypt hashes."""
     assert _AUTH_OK, f"auth import failed: {_IMPORT_ERRORS}"
 
-    required_keys = {"password", "role", "retailer_slug", "supplier_slug"}
+    required_keys = {"hashed_password", "role", "retailer_slug", "supplier_slug"}
     expected_roles = {"admin", "retailer", "supplier"}
 
     assert len(_DEV_USERS) == 3, \
@@ -285,8 +297,75 @@ def _test_10_dev_users_structure() -> None:
     for username, user in _DEV_USERS.items():
         missing = required_keys - set(user.keys())
         assert not missing, f"User '{username}' missing keys: {missing}"
-        assert user["password"], f"User '{username}' has empty password"
-        assert user["role"] in expected_roles, f"User '{username}' has invalid role: {user['role']!r}"
+
+        # Hashed password must be a bcrypt hash (starts with $2b$)
+        hp = user["hashed_password"]
+        assert hp.startswith("$2b$"), \
+            f"User '{username}' hashed_password is not a bcrypt hash: {hp[:20]!r}"
+
+        assert user["role"] in expected_roles, \
+            f"User '{username}' has invalid role: {user['role']!r}"
+
+    # Verify _verify_password works against the stored hashes
+    assert _verify_password("certportal_admin",    _DEV_USERS["pam_admin"]["hashed_password"])
+    assert _verify_password("certportal_retailer", _DEV_USERS["lowes_retailer"]["hashed_password"])
+    assert _verify_password("certportal_supplier", _DEV_USERS["acme_supplier"]["hashed_password"])
+
+
+# ---------------------------------------------------------------------------
+# Test 11: authenticate_user — DB path with mocked asyncpg
+# ---------------------------------------------------------------------------
+
+def _test_11_authenticate_user_db_path() -> None:
+    """authenticate_user uses portal_users DB row when asyncpg returns a record.
+
+    asyncpg.connect is patched to return a mock connection whose fetchrow()
+    returns a realistic fake record — verifying that the DB code path executes
+    and that bcrypt verification is applied to the row's hashed_password.
+    """
+    assert _AUTH_OK, f"auth import failed: {_IMPORT_ERRORS}"
+
+    import bcrypt as _bcrypt_lib  # same lib used by auth.py
+    from unittest.mock import AsyncMock, patch
+    import certportal.core.auth as _auth_mod
+
+    # Build a fake DB record with a known password
+    db_password = "db_secure_password"
+    db_hash = _bcrypt_lib.hashpw(db_password.encode(), _bcrypt_lib.gensalt(rounds=4)).decode()
+
+    fake_row = {
+        "username": "db_test_user",
+        "hashed_password": db_hash,
+        "role": "retailer",
+        "retailer_slug": "testco",
+        "supplier_slug": None,
+    }
+
+    # Mock asyncpg.connect to return a mock connection
+    mock_conn = AsyncMock()
+    mock_conn.fetchrow = AsyncMock(return_value=fake_row)
+    mock_conn.close = AsyncMock()
+
+    with patch.object(_auth_mod.asyncpg, "connect", AsyncMock(return_value=mock_conn)):
+        # Valid DB credentials
+        user = _run_async(authenticate_user("db_test_user", db_password))
+        assert user is not None, "Expected user dict from DB path, got None"
+        assert user["sub"] == "db_test_user"
+        assert user["role"] == "retailer"
+        assert user["retailer_slug"] == "testco"
+
+        # Wrong password — DB path returns None (no _DEV_USERS fallback for existing DB user)
+        mock_conn.fetchrow = AsyncMock(return_value=fake_row)
+        bad = _run_async(authenticate_user("db_test_user", "wrong_password"))
+        assert bad is None, f"Expected None for wrong DB password, got: {bad}"
+
+        # User not found in DB (row = None) — falls through to _DEV_USERS
+        mock_conn.fetchrow = AsyncMock(return_value=None)
+        # "pam_admin" is in _DEV_USERS, so it should still authenticate via fallback
+        fallback_user = _run_async(authenticate_user("pam_admin", "certportal_admin"))
+        assert fallback_user is not None, \
+            "Expected _DEV_USERS fallback when DB row is None"
+        assert fallback_user["sub"] == "pam_admin"
 
 
 # ---------------------------------------------------------------------------
@@ -294,18 +373,19 @@ def _test_10_dev_users_structure() -> None:
 # ---------------------------------------------------------------------------
 
 def run() -> list[dict]:
-    """Run all 10 auth tests. No live DB, S3, or OpenAI required."""
+    """Run all 11 auth tests. No live DB, S3, or OpenAI required."""
     tests = [
-        ("suite_a_test_01", "Auth: create_access_token + decode_token round-trip",          _test_01_token_round_trip),
-        ("suite_a_test_02", "Auth: get_current_user resolves from Bearer header",            _test_02_get_current_user_bearer_header),
-        ("suite_a_test_03", "Auth: get_current_user resolves from cookie",                   _test_03_get_current_user_cookie),
-        ("suite_a_test_04", "Auth: Bearer header takes priority over cookie",                _test_04_get_current_user_bearer_priority),
-        ("suite_a_test_05", "Auth: no token raises HTTP 401",                               _test_05_get_current_user_no_token_raises_401),
-        ("suite_a_test_06", "Auth: expired token raises HTTP 401",                          _test_06_decode_token_expired_raises_401),
-        ("suite_a_test_07", "Auth: require_role matching role passes",                      _test_07_require_role_pass),
-        ("suite_a_test_08", "Auth: require_role wrong role raises HTTP 403",                _test_08_require_role_fail),
-        ("suite_a_test_09", "Auth: authenticate_user valid/invalid credentials",            _test_09_authenticate_user),
-        ("suite_a_test_10", "Auth: _DEV_USERS has 3 users with required structure",         _test_10_dev_users_structure),
+        ("suite_a_test_01", "Auth: create_access_token + decode_token round-trip",            _test_01_token_round_trip),
+        ("suite_a_test_02", "Auth: get_current_user resolves from Bearer header",              _test_02_get_current_user_bearer_header),
+        ("suite_a_test_03", "Auth: get_current_user resolves from cookie",                     _test_03_get_current_user_cookie),
+        ("suite_a_test_04", "Auth: Bearer header takes priority over cookie",                  _test_04_get_current_user_bearer_priority),
+        ("suite_a_test_05", "Auth: no token raises HTTP 401",                                 _test_05_get_current_user_no_token_raises_401),
+        ("suite_a_test_06", "Auth: expired token raises HTTP 401",                            _test_06_decode_token_expired_raises_401),
+        ("suite_a_test_07", "Auth: require_role matching role passes",                        _test_07_require_role_pass),
+        ("suite_a_test_08", "Auth: require_role wrong role raises HTTP 403",                  _test_08_require_role_fail),
+        ("suite_a_test_09", "Auth: authenticate_user valid/invalid via _DEV_USERS fallback",  _test_09_authenticate_user_dev_fallback),
+        ("suite_a_test_10", "Auth: _DEV_USERS has 3 users with bcrypt hashes",               _test_10_dev_users_structure),
+        ("suite_a_test_11", "Auth: authenticate_user DB path (mocked asyncpg)",              _test_11_authenticate_user_db_path),
     ]
 
     results = []

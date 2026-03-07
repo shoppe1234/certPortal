@@ -16,47 +16,82 @@ Auth flow:
   POST /logout → clear access_token cookie, redirect to /login
   All other routes → FastAPI dependency get_current_user() checks cookie or Bearer header.
 
-Sprint 1: credentials stored in _DEV_USERS (plaintext). Not for production.
-Sprint 2: replace _DEV_USERS with DB users table + bcrypt password hashing.
+Password storage:
+  Passwords are bcrypt-hashed (rounds=12) using the bcrypt library directly.
+  DB: portal_users table, queried via asyncpg (see migrations/002_users_table.sql).
+  Fallback: _DEV_USERS in-memory dict used when DB is unavailable (dev/CI only).
+
+Sprint 1: _DEV_USERS with bcrypt-hashed dev passwords.
+Sprint 2 (this file): async authenticate_user() queries portal_users table first.
+Sprint 3: /register, /change-password, refresh tokens.
 """
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+import asyncpg
+import bcrypt as _bcrypt_lib
 from fastapi import Cookie, Depends, Header, HTTPException, status
 from jose import JWTError, jwt
 
 from certportal.core.config import settings
 
+logger = logging.getLogger(__name__)
+
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 480  # 8-hour session (full working day)
 
 # ---------------------------------------------------------------------------
-# Sprint 1 dev credentials
-# Sprint 2: replace with DB users table + bcrypt (hash with passlib.bcrypt)
+# Dev user registry
+#
+# Passwords are bcrypt-hashed (rounds=12). Plaintext reference:
+#   pam_admin       → certportal_admin
+#   lowes_retailer  → certportal_retailer
+#   acme_supplier   → certportal_supplier
+#
+# Seeded into portal_users by migrations/002_users_table.sql.
+# _DEV_USERS is the in-process fallback used when DB is unreachable (dev/CI).
 # ---------------------------------------------------------------------------
 
 _DEV_USERS: dict[str, dict[str, Any]] = {
     "pam_admin": {
-        "password": "certportal_admin",
+        "hashed_password": "$2b$12$zm9vZ9thChmd45pNMC35lOh4MFdDmcuYrFiehnlYv.mnTMhD4GNU6",
         "role": "admin",
         "retailer_slug": None,
         "supplier_slug": None,
     },
     "lowes_retailer": {
-        "password": "certportal_retailer",
+        "hashed_password": "$2b$12$GFviKss9RDxqxa1wmxt8dO9Quy/tf9eWmbzck6Uh.SrAmywWWjSgW",
         "role": "retailer",
         "retailer_slug": "lowes",
         "supplier_slug": None,
     },
     "acme_supplier": {
-        "password": "certportal_supplier",
+        "hashed_password": "$2b$12$WWdvIWgYMYgKw/Ju1Sc7YuD665.oOkA31RDKArlzTR9VmiaMHOTZS",
         "role": "supplier",
         "retailer_slug": "lowes",
         "supplier_slug": "acme",
     },
 }
+
+
+# ---------------------------------------------------------------------------
+# Password helpers
+# ---------------------------------------------------------------------------
+
+def _verify_password(plain: str, hashed: str) -> bool:
+    """Return True if plain matches the bcrypt-hashed value."""
+    return _bcrypt_lib.checkpw(plain.encode("utf-8"), hashed.encode("utf-8"))
+
+
+def hash_password(plain: str) -> str:
+    """Hash a plaintext password with bcrypt (rounds=12).
+
+    Used by /change-password endpoint (Sprint 3) and migration seeding.
+    """
+    return _bcrypt_lib.hashpw(plain.encode("utf-8"), _bcrypt_lib.gensalt(rounds=12)).decode("utf-8")
 
 
 # ---------------------------------------------------------------------------
@@ -159,21 +194,98 @@ def require_role(*allowed_roles: str):
 
 
 # ---------------------------------------------------------------------------
-# Credential validation (Sprint 1: plaintext lookup)
+# DB helper — fetch a user row from portal_users via asyncpg
 # ---------------------------------------------------------------------------
 
-def authenticate_user(username: str, password: str) -> dict[str, Any] | None:
-    """Validate username + password against _DEV_USERS.
+async def _db_fetch_user(username: str) -> dict[str, Any] | None:
+    """Query portal_users for a single active user row.
 
-    Returns the user record dict on success, None on failure.
-    Sprint 2: replace with DB query + bcrypt.checkpw().
+    Returns a dict with keys: username, hashed_password, role, retailer_slug,
+    supplier_slug — or None if the user is not found or is inactive.
+
+    Raises any asyncpg / network exception to the caller (authenticate_user
+    catches them and falls back to _DEV_USERS).
     """
-    user = _DEV_USERS.get(username)
-    if user is None:
+    conn: asyncpg.Connection = await asyncpg.connect(settings.certportal_db_url)
+    try:
+        row = await conn.fetchrow(
+            "SELECT username, hashed_password, role, retailer_slug, supplier_slug "
+            "FROM portal_users "
+            "WHERE username = $1 AND is_active = TRUE",
+            username,
+        )
+    finally:
+        await conn.close()
+
+    if row is None:
         return None
-    if user["password"] != password:  # Sprint 2: bcrypt.checkpw(password, user["hashed_pw"])
+    return dict(row)
+
+
+# ---------------------------------------------------------------------------
+# Credential validation — DB first, _DEV_USERS fallback
+# ---------------------------------------------------------------------------
+
+async def authenticate_user(username: str, password: str) -> dict[str, Any] | None:
+    """Validate username + password.
+
+    Priority:
+      1. Query portal_users table via asyncpg (DB must be up + migrated).
+         - If user found in DB:  verify password → return record or None (no fallback).
+         - If user NOT in DB:    fall through to _DEV_USERS.
+      2. _DEV_USERS in-process dict (dev / CI fallback when DB is unreachable).
+
+    Returns the user record dict on success:
+        {"sub": username, "role": ..., "retailer_slug": ..., "supplier_slug": ...}
+    Returns None if credentials are invalid.
+
+    Never raises — DB errors are caught and logged; fallback is used.
+    """
+    # ------------------------------------------------------------------
+    # 1. DB authentication
+    # ------------------------------------------------------------------
+    db_row: dict[str, Any] | None = None
+    db_available = False
+
+    try:
+        db_row = await _db_fetch_user(username)
+        db_available = True
+    except Exception as exc:
+        logger.warning(
+            "authenticate_user: DB unavailable (%s: %s), falling back to _DEV_USERS",
+            type(exc).__name__,
+            exc,
+        )
+
+    if db_available:
+        if db_row is None:
+            # User not found in DB — fall through to _DEV_USERS
+            pass
+        else:
+            # User exists in DB — verify password; do NOT fall back on wrong password
+            if _verify_password(password, db_row["hashed_password"]):
+                return {
+                    "sub": db_row["username"],
+                    "role": db_row["role"],
+                    "retailer_slug": db_row["retailer_slug"],
+                    "supplier_slug": db_row["supplier_slug"],
+                }
+            return None  # Wrong password — no _DEV_USERS backdoor
+
+    # ------------------------------------------------------------------
+    # 2. _DEV_USERS fallback (DB not reachable OR user not found in DB)
+    # ------------------------------------------------------------------
+    dev_user = _DEV_USERS.get(username)
+    if dev_user is None:
         return None
-    return {"sub": username, **user}
+    if not _verify_password(password, dev_user["hashed_password"]):
+        return None
+    return {
+        "sub": username,
+        "role": dev_user["role"],
+        "retailer_slug": dev_user.get("retailer_slug"),
+        "supplier_slug": dev_user.get("supplier_slug"),
+    }
 
 
 def build_token_claims(user_record: dict[str, Any]) -> dict[str, Any]:

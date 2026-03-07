@@ -130,7 +130,7 @@ async def login_for_access_token(
     form_data: OAuth2PasswordRequestForm = Depends(),
 ):
     """Validate credentials, set httponly JWT cookie, redirect to dashboard."""
-    user = authenticate_user(form_data.username, form_data.password)
+    user = await authenticate_user(form_data.username, form_data.password)
     if not user:
         return RedirectResponse(url="/login?error=Invalid+username+or+password", status_code=302)
     if user.get("role") not in ("admin", "retailer"):
@@ -151,7 +151,7 @@ async def login_for_access_token(
 @app.post("/token/api")
 async def api_token(form_data: OAuth2PasswordRequestForm = Depends()):
     """Return JWT as JSON (for programmatic / test use)."""
-    user = authenticate_user(form_data.username, form_data.password)
+    user = await authenticate_user(form_data.username, form_data.password)
     if not user:
         raise HTTPException(status_code=401, detail="Invalid username or password")
     token = create_access_token(build_token_claims(user))

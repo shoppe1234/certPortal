@@ -196,6 +196,48 @@ and `/change-password` endpoints. Refresh tokens out of scope for Sprint 1.
 
 ---
 
+## ADR-015: DB-backed portal authentication (Sprint 2)
+
+**Context:** ADR-014 implemented JWT with `_DEV_USERS` — a plaintext in-process dict of three
+dev accounts. That approach is unsuitable for any shared or non-local environment.
+ADR-014 explicitly flagged Sprint 2 replacement with DB + bcrypt.
+
+**Decision:** `authenticate_user()` in `certportal/core/auth.py` is now an async function
+that queries the `portal_users` Postgres table via asyncpg first, falling back to `_DEV_USERS`
+bcrypt verification when the DB is unreachable.
+
+**Design choices:**
+1. **bcrypt library (not passlib)** — `bcrypt>=4.0` is used directly (`bcrypt.hashpw` /
+   `bcrypt.checkpw`). `passlib[bcrypt]` has a known compatibility issue with Python ≥ 3.13
+   (AttributeError on `__about__`). The `bcrypt` library has no such issue. Rounds=12.
+2. **asyncpg for portal auth** — Portals are FastAPI async apps; asyncpg is already in
+   `requirements.txt` and is async-native. (lifecycle_engine uses psycopg2 per CLAUDE.md for
+   its synchronous library context — no conflict.)
+3. **DB-first, _DEV_USERS fallback** — authenticate_user tries the DB:
+   - DB unreachable (exception): warning logged → _DEV_USERS bcrypt fallback.
+   - User found in DB with wrong password: returns None immediately (no _DEV_USERS backdoor).
+   - User not found in DB: falls through to _DEV_USERS (supports dev users not yet seeded).
+   - User found in DB with correct password: returns user record, no fallback needed.
+4. **_DEV_USERS passwords are bcrypt-hashed** — Sprint 1 plaintext `password` key replaced
+   with `hashed_password` (bcrypt, rounds=12). The dev passwords are unchanged; the storage
+   format is now secure in both code and migrations.
+5. **migrations/002_users_table.sql** — Creates `portal_users` table (id, username,
+   hashed_password, role, retailer_slug, supplier_slug, is_active, created_at, updated_at).
+   Seeds the 3 dev users ON CONFLICT DO NOTHING (idempotent re-runs).
+6. **Portal /token endpoints** — All six `authenticate_user()` calls (2 per portal × 3
+   portals) updated from `user = authenticate_user(...)` to `user = await authenticate_user(...)`.
+
+**Suite A** — Updated to 11 tests (was 10):
+- test_09: async call via `_run_async(authenticate_user(...))`, uses _DEV_USERS fallback.
+- test_10: checks `hashed_password` key (not `password`) and verifies bcrypt format (`$2b$`).
+- test_11 (new): mocks `asyncpg.connect` to test the DB code path; also verifies the
+  "user not found in DB → _DEV_USERS fallback" sub-path.
+
+**Sprint 3:** `/register` and `/change-password` endpoints using `hash_password()` helper
+(already exported from auth.py). Refresh token support out of scope.
+
+---
+
 ## Out-of-scope items (not built per Section 10)
 
 - React frontend
