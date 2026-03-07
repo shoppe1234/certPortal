@@ -157,6 +157,45 @@ if staging environments need state-machine simulation without Postgres writes.
 
 ---
 
+## ADR-014: JWT authentication across all three portals
+
+**Context:** ADR-008 deferred JWT auth to Sprint 2. The dependency `python-jose[cryptography]`
+was already in `requirements.txt`. Sprint 1 portals ran without auth — routes returned first-row
+DB data with no user context, marked with `# Sprint 1: no auth` comments.
+
+**Decision:** Implemented full JWT HS256 authentication in `certportal/core/auth.py` and wired
+it into all three portals (Pam, Meredith, Chrissy). This supersedes ADR-008.
+
+**Design choices:**
+1. **Shared auth module** — all three portals import from `certportal.core.auth` (INV-07: portals
+   never import from `agents/`, importing from `certportal.core` is explicitly permitted).
+2. **Dual token acceptance** — `get_current_user()` accepts `Authorization: Bearer <token>` header
+   (API/programmatic callers) OR `access_token` httponly cookie (browser sessions after `/token`).
+   Bearer header takes priority when both are present.
+3. **`require_role()` factory** — returns a FastAPI dependency; applied at the router level via
+   `APIRouter(dependencies=[Depends(require_role(...))])` so all data routes in a portal are
+   protected without per-route repetition.
+4. **Role scoping** — Pam requires `admin`. Meredith requires `admin` or `retailer`. Chrissy
+   requires `admin` or `supplier`. Admin users see cross-tenant data; scoped users see only their
+   own `retailer_slug` / `supplier_slug`.
+5. **Login flow** — each portal has `/login` (GET, inline HTML), `/token` (POST form → cookie +
+   302 redirect), `/token/api` (POST → JSON, for tests), `/logout` (POST → clear cookie + 302).
+6. **401/403 exception handlers** — browser requests (Accept: text/html) redirect to `/login`;
+   API callers receive JSON error responses.
+7. **Sprint 1 credentials** — `_DEV_USERS` dict with plaintext passwords (3 users: pam_admin,
+   lowes_retailer, acme_supplier). Marked for Sprint 2 replacement with DB users + bcrypt.
+8. **Token lifetime** — 480 minutes (8-hour working day). `ACCESS_TOKEN_EXPIRE_MINUTES` is a
+   module-level constant used by all portals.
+
+**Suite A coverage** — `testing/suites/suite_a.py` verifies: token round-trip, Bearer header
+acceptance, cookie acceptance, Bearer-over-cookie priority, 401 on missing token, 401 on expired
+token, require_role pass, require_role 403 fail, authenticate_user, _DEV_USERS structure.
+
+**Sprint 2:** Replace `_DEV_USERS` with DB `users` table + `bcrypt.checkpw()`. Add `/register`
+and `/change-password` endpoints. Refresh tokens out of scope for Sprint 1.
+
+---
+
 ## Out-of-scope items (not built per Section 10)
 
 - React frontend
