@@ -248,3 +248,65 @@ bcrypt verification when the DB is unreachable.
 - PagerDuty (`if settings.pagerduty_key` guard pattern noted but not implemented)
 - Full PyEDI-Core integration (stubbed)
 - Production PostgreSQL schema migrations (schema SQL in database.py as comments only)
+
+## ADR-016: Sprint 3 /register and /change-password Endpoints
+
+**Date:** 2026-03-07
+**Status:** Accepted
+
+### Context
+
+ADR-015 introduced bcrypt-hashed passwords and the portal_users DB table seeded with dev
+users, but provided no runtime mechanism to add new users or rotate passwords. Sprint 3 adds
+self-service password management and admin-controlled user provisioning without requiring
+direct DB access.
+
+### Decision
+
+**POST /register (Pam admin portal only)**
+- Lives on the admin-protected router (require_role admin).
+- GET: renders inline HTML form (dark Pam theme) with fields: username, password,
+  confirm_password, role (dropdown: admin/retailer/supplier), retailer_slug (optional),
+  supplier_slug (optional).
+- POST: validates fields, hashes password via hash_password() (bcrypt rounds=12), INSERTs
+  into portal_users. Catches asyncpg.UniqueViolationError for duplicate username.
+- All validation failures redirect to /register?error=... (PRG pattern).
+- Accessible at http://localhost:8000/register (admin portal port only).
+
+**POST /change-password (all three portals)**
+- Lives on the protected router of each portal (admin, retailer/admin, supplier/admin).
+- GET: renders inline HTML form themed per portal (dark/light/warm).
+  Displays currently signed-in username from the JWT sub claim.
+- POST logic:
+  1. Validate new passwords match.
+  2. Validate len(new_password) >= 8.
+  3. Verify current_password via authenticate_user() (DB-first + _DEV_USERS fallback).
+  4. Hash new password: hash_password(new_password).
+  5. UPDATE portal_users SET hashed_password = ..., updated_at = NOW() WHERE username = ...
+  6. If UPDATE 0 (user is dev-only, not in DB): redirect with informational error.
+  7. Success: redirect to /change-password?msg=Password+changed+successfully.
+
+### Rationale
+
+| Choice | Reason |
+|---|---|
+| PRG pattern (Post-Redirect-Get) | Prevents form re-submission on refresh |
+| Inline HTML (not Jinja2 templates) | Consistent with existing login pages; no template file proliferation |
+| authenticate_user() for current-pw verify | Re-uses existing DB+fallback path; correct semantics |
+| UPDATE 0 check | Informs dev users (fallback only) that they cannot persist password changes |
+| Admin-only /register | Prevents self-registration; admin controls who has portal access |
+
+### Consequences
+
+- portals/pam.py: imports asyncpg (for UniqueViolationError) and hash_password.
+- portals/meredith.py, portals/chrissy.py: import Form, Annotated, asyncpg, hash_password.
+- testing/suites/suite_a.py: 11 to 14 tests (test_12 hash_password round-trip, test_13
+  /register endpoint, test_14 /change-password endpoint via TestClient + mocked DB).
+- No new DB migrations required: endpoints write to portal_users from migrations/002.
+
+### Not implemented (Sprint 3 scope boundary)
+
+- Refresh tokens (deferred to Sprint 4)
+- Email-based password reset (deferred)
+- Account deletion / deactivation UI (admin can UPDATE portal_users SET is_active = FALSE directly)
+- Nav-bar links to /register and /change-password (deferred; accessible via direct URL)

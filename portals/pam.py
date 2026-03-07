@@ -14,6 +14,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Annotated
 
+import asyncpg
 from fastapi import APIRouter, Depends, FastAPI, Form, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.security import OAuth2PasswordRequestForm
@@ -26,6 +27,7 @@ from certportal.core.auth import (
     build_token_claims,
     create_access_token,
     get_current_user,
+    hash_password,
     require_role,
 )
 from certportal.core.database import get_connection, get_pool
@@ -404,6 +406,200 @@ async def hitl_count_partial(
         "SELECT COUNT(*) FROM hitl_queue WHERE status = 'PENDING_APPROVAL'"
     ) or 0
     return HTMLResponse(f'<span class="hitl-badge" data-count="{count}">{count}</span>')
+
+
+# ---------------------------------------------------------------------------
+# Protected: Register new user (admin only — sits on admin router)
+# ---------------------------------------------------------------------------
+
+_PAM_CARD_CSS = """
+  body{font-family:monospace;background:#0a0e1a;color:#c9d1d9;display:flex;
+       align-items:center;justify-content:center;min-height:100vh;margin:0}
+  .card{background:#1e2d40;padding:2.5rem;border-radius:8px;width:480px;
+        box-shadow:0 4px 24px rgba(0,0,0,.4)}
+  h1{color:#00ff88;font-size:1.3rem;margin:0 0 1.5rem}
+  label{display:block;font-size:.75rem;color:#8b949e;margin-bottom:.25rem;
+        text-transform:uppercase;letter-spacing:.5px}
+  input,select{width:100%;box-sizing:border-box;padding:.55rem .7rem;
+               background:#0a0e1a;border:1px solid #30363d;border-radius:4px;
+               color:#c9d1d9;font-family:monospace;font-size:.9rem;margin-bottom:.9rem}
+  select option{background:#0a0e1a}
+  button{width:100%;margin-top:.3rem;padding:.7rem;background:#00ff88;color:#0a0e1a;
+         border:none;border-radius:4px;font-weight:700;font-size:.95rem;cursor:pointer;
+         font-family:monospace}
+  button:hover{background:#00cc6e}
+  .msg{color:#00ff88;margin-bottom:1rem;font-size:.9rem}
+  .err{color:#ff4455;margin-bottom:1rem;font-size:.9rem}
+  .back{margin-top:1rem;font-size:.82rem}
+  .back a{color:#00ff88;text-decoration:none}
+"""
+
+
+@router.get("/register", response_class=HTMLResponse)
+async def register_page(
+    request: Request,
+    user: dict = Depends(get_current_user),
+    error: str = "",
+    msg: str = "",
+):
+    """Render the user registration form (admin only)."""
+    err_html = f'<p class="err">{error}</p>' if error else ""
+    msg_html = f'<p class="msg">{msg}</p>' if msg else ""
+    return HTMLResponse(f"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<title>certPortal Admin — Register User</title>
+<style>{_PAM_CARD_CSS}</style></head>
+<body><div class="card">
+  <h1>certPortal &middot; Register User</h1>
+  {msg_html}{err_html}
+  <form method="post" action="/register">
+    <label>Username</label>
+    <input name="username" autocomplete="off" required>
+    <label>Password (min 8 characters)</label>
+    <input name="password" type="password" autocomplete="new-password" required minlength="8">
+    <label>Confirm Password</label>
+    <input name="confirm_password" type="password" autocomplete="new-password" required>
+    <label>Role</label>
+    <select name="role" required>
+      <option value="">&#8212; select role &#8212;</option>
+      <option value="admin">admin</option>
+      <option value="retailer">retailer</option>
+      <option value="supplier">supplier</option>
+    </select>
+    <label>Retailer Slug (optional)</label>
+    <input name="retailer_slug" placeholder="e.g. lowes">
+    <label>Supplier Slug (optional)</label>
+    <input name="supplier_slug" placeholder="e.g. acme">
+    <button type="submit">Register User</button>
+  </form>
+  <p class="back"><a href="/">&#8592; Back to Dashboard</a></p>
+</div></body></html>""")
+
+
+@router.post("/register")
+async def register_user(
+    request: Request,
+    username: Annotated[str, Form()],
+    password: Annotated[str, Form()],
+    confirm_password: Annotated[str, Form()],
+    role: Annotated[str, Form()],
+    retailer_slug: Annotated[str, Form()] = "",
+    supplier_slug: Annotated[str, Form()] = "",
+    conn=Depends(get_connection),
+    user: dict = Depends(get_current_user),
+):
+    """Create a new portal_users row (admin only)."""
+    _allowed_roles = {"admin", "retailer", "supplier"}
+
+    if not username.strip():
+        return RedirectResponse(url="/register?error=Username+is+required", status_code=302)
+    if password != confirm_password:
+        return RedirectResponse(url="/register?error=Passwords+do+not+match", status_code=302)
+    if len(password) < 8:
+        return RedirectResponse(url="/register?error=Password+must+be+at+least+8+characters", status_code=302)
+    if role not in _allowed_roles:
+        return RedirectResponse(url="/register?error=Invalid+role+%28must+be+admin%2C+retailer%2C+or+supplier%29", status_code=302)
+
+    new_hash = hash_password(password)
+    try:
+        await conn.execute(
+            "INSERT INTO portal_users (username, hashed_password, role, retailer_slug, supplier_slug) "
+            "VALUES ($1, $2, $3, $4, $5)",
+            username.strip(),
+            new_hash,
+            role,
+            retailer_slug.strip() or None,
+            supplier_slug.strip() or None,
+        )
+    except asyncpg.UniqueViolationError:
+        return RedirectResponse(url="/register?error=Username+already+taken", status_code=302)
+
+    return RedirectResponse(
+        url=f"/register?msg=User+%27{username.strip()}%27+registered+successfully",
+        status_code=302,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Protected: Change password (any authenticated admin user)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/change-password", response_class=HTMLResponse)
+async def change_password_page(
+    request: Request,
+    user: dict = Depends(get_current_user),
+    error: str = "",
+    msg: str = "",
+):
+    """Render the change-password form."""
+    err_html = f'<p class="err">{error}</p>' if error else ""
+    msg_html = f'<p class="msg">{msg}</p>' if msg else ""
+    username = user.get("sub", "")
+    return HTMLResponse(f"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<title>certPortal Admin — Change Password</title>
+<style>{_PAM_CARD_CSS}</style></head>
+<body><div class="card">
+  <h1>certPortal &middot; Change Password</h1>
+  <p style="color:#6a8aa8;font-size:.85rem;margin-bottom:1.2rem">Signed in as <strong style="color:#c8d8e8">{username}</strong></p>
+  {msg_html}{err_html}
+  <form method="post" action="/change-password">
+    <label>Current Password</label>
+    <input name="current_password" type="password" autocomplete="current-password" required>
+    <label>New Password (min 8 characters)</label>
+    <input name="new_password" type="password" autocomplete="new-password" required minlength="8">
+    <label>Confirm New Password</label>
+    <input name="confirm_password" type="password" autocomplete="new-password" required>
+    <button type="submit">Change Password</button>
+  </form>
+  <p class="back"><a href="/">&#8592; Back to Dashboard</a></p>
+</div></body></html>""")
+
+
+@router.post("/change-password")
+async def change_password(
+    request: Request,
+    current_password: Annotated[str, Form()],
+    new_password: Annotated[str, Form()],
+    confirm_password: Annotated[str, Form()],
+    conn=Depends(get_connection),
+    user: dict = Depends(get_current_user),
+):
+    """Verify current password and update to a new bcrypt hash."""
+    if new_password != confirm_password:
+        return RedirectResponse(
+            url="/change-password?error=New+passwords+do+not+match", status_code=302
+        )
+    if len(new_password) < 8:
+        return RedirectResponse(
+            url="/change-password?error=New+password+must+be+at+least+8+characters",
+            status_code=302,
+        )
+
+    # Verify current credentials — uses DB or _DEV_USERS fallback
+    verified = await authenticate_user(user["sub"], current_password)
+    if verified is None:
+        return RedirectResponse(
+            url="/change-password?error=Current+password+is+incorrect", status_code=302
+        )
+
+    new_hash = hash_password(new_password)
+    result = await conn.execute(
+        "UPDATE portal_users SET hashed_password = $1, updated_at = NOW() "
+        "WHERE username = $2 AND is_active = TRUE",
+        new_hash,
+        user["sub"],
+    )
+    if result == "UPDATE 0":
+        return RedirectResponse(
+            url="/change-password?error=Password+update+failed+%28dev-only+account+not+in+DB%3F%29",
+            status_code=302,
+        )
+
+    return RedirectResponse(
+        url="/change-password?msg=Password+changed+successfully", status_code=302
+    )
 
 
 # Mount the protected router
