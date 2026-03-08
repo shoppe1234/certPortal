@@ -100,7 +100,7 @@ def run(retailer_slug: str, supplier_slug: str) -> dict:
         )
         summary["actions_taken"].append(f"surfaced_{len(flags)}_hitl_flags")
 
-    # 5. Check for Kelly sentiment escalations
+    # 5. Check for Kelly sentiment escalations and queue each for HITL (ADR-022)
     escalations = _check_kelly_escalations(workspace, supplier_slug)
     if escalations:
         summary["actions_taken"].append(f"kelly_escalations_detected:{len(escalations)}")
@@ -111,6 +111,10 @@ def run(retailer_slug: str, supplier_slug: str) -> dict:
             retailer_slug=retailer_slug,
             supplier_slug=supplier_slug,
         )
+        for thread_id in escalations:
+            inserted = _queue_escalation_for_hitl(supplier_slug, retailer_slug, thread_id)
+            if inserted:
+                summary["actions_taken"].append(f"escalation_queued:{thread_id}")
 
     monica_logger.log(
         "MONICA",
@@ -253,6 +257,70 @@ def _check_kelly_escalations(workspace: S3AgentWorkspace, supplier_slug: str) ->
         return escalations
     except FileNotFoundInWorkspace:
         return []
+
+
+def _queue_escalation_for_hitl(
+    supplier_slug: str,
+    retailer_slug: str,
+    thread_id: str,
+) -> bool:
+    """Write one hitl_queue row for a Kelly sentiment escalation (ADR-022).
+
+    Idempotent: ON CONFLICT (queue_id) DO NOTHING.
+    Returns True if inserted, False if already queued or DB unavailable.
+    Uses psycopg2 (sync) — consistent with Kelly's dispatch_approved() pattern.
+    """
+    import os
+    import time
+    import psycopg2
+
+    dsn = os.environ.get("CERTPORTAL_DB_URL", "")
+    if not dsn:
+        monica_logger.log(
+            "MONICA", "A",
+            "CERTPORTAL_DB_URL not set — skipping escalation HITL insert",
+        )
+        return False
+
+    queue_id = f"escalation_{thread_id}_{int(time.time())}"
+    draft = (
+        f"SENTIMENT ESCALATION ALERT\n\n"
+        f"Supplier: {supplier_slug}\n"
+        f"Retailer: {retailer_slug}\n"
+        f"Thread: {thread_id}\n\n"
+        f"Kelly detected a negative sentiment pattern requiring human review. "
+        f"Please authorize a follow-up response."
+    )
+    summary_text = f"Kelly sentiment escalation: {supplier_slug}/{thread_id}"
+
+    try:
+        conn = psycopg2.connect(dsn)
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "INSERT INTO hitl_queue "
+                "  (queue_id, retailer_slug, supplier_slug, agent, draft, summary,"
+                "   thread_id, channel, status) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) "
+                "ON CONFLICT (queue_id) DO NOTHING",
+                (
+                    queue_id, retailer_slug, supplier_slug,
+                    "KELLY", draft, summary_text,
+                    thread_id, "email", "PENDING_APPROVAL",
+                ),
+            )
+            inserted = cur.rowcount > 0
+            conn.commit()
+            cur.close()
+        finally:
+            conn.close()
+        return inserted
+    except Exception as exc:
+        monica_logger.log(
+            "MONICA", "A",
+            f"_queue_escalation_for_hitl error: {type(exc).__name__}: {exc}",
+        )
+        return False
 
 
 def _summarise_for_hitl(draft: str) -> str:

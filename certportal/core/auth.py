@@ -24,10 +24,15 @@ Password storage:
 Sprint 1: _DEV_USERS with bcrypt-hashed dev passwords.
 Sprint 2 (this file): async authenticate_user() queries portal_users table first.
 Sprint 3: /register, /change-password, refresh tokens.
+Sprint 4: create_refresh_token(), decode_refresh_token(), type-claim separation.
+Sprint 5: JTI claim, _revocation_pool, set_revocation_pool(), revocation check (ADR-021).
+Sprint 6: create_password_reset_token(), validate_password_reset_token(),
+          cleanup_expired_revoked_tokens() (ADR-023 + ADR-025).
 """
 from __future__ import annotations
 
 import logging
+import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -42,6 +47,42 @@ logger = logging.getLogger(__name__)
 
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 480  # 8-hour session (full working day)
+REFRESH_TOKEN_EXPIRE_DAYS = 30     # 30-day refresh token (ADR-017)
+
+# ---------------------------------------------------------------------------
+# JWT revocation pool (ADR-021)
+# ---------------------------------------------------------------------------
+
+_revocation_pool: "asyncpg.Pool | None" = None
+
+
+def set_revocation_pool(pool: "asyncpg.Pool | None") -> None:
+    """Register the asyncpg pool used for JWT revocation checks.
+
+    Called by each portal's lifespan context manager. When None (default),
+    revocation checks are skipped — tests remain fully backward compatible.
+    """
+    global _revocation_pool
+    _revocation_pool = pool
+
+
+async def revoke_jti(jti: "str | None", exp: "int | None") -> None:
+    """Insert a token's JTI into revoked_tokens so future requests are rejected.
+
+    No-op if _revocation_pool is not configured (e.g. in tests) or args are None.
+    Called by each portal's /logout handler — encapsulates pool + datetime logic.
+    """
+    if not jti or not exp or _revocation_pool is None:
+        return
+    expires_at = datetime.fromtimestamp(exp, tz=timezone.utc)
+    async with _revocation_pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO revoked_tokens (jti, expires_at) "
+            "VALUES ($1, $2) ON CONFLICT (jti) DO NOTHING",
+            jti,
+            expires_at,
+        )
+
 
 # ---------------------------------------------------------------------------
 # Dev user registry
@@ -102,11 +143,44 @@ def create_access_token(
     data: dict[str, Any],
     expires_minutes: int = ACCESS_TOKEN_EXPIRE_MINUTES,
 ) -> str:
-    """Encode a JWT access token with the given claims + expiry."""
+    """Encode a JWT access token with the given claims + expiry.
+
+    ADR-021: includes a 'jti' (JWT ID) claim for revocation tracking.
+    """
     payload = data.copy()
     expire = datetime.now(timezone.utc) + timedelta(minutes=expires_minutes)
     payload["exp"] = expire
+    payload["jti"] = secrets.token_hex(16)   # ADR-021: unique revocation token ID
     return jwt.encode(payload, settings.certportal_jwt_secret, algorithm=ALGORITHM)
+
+
+def create_refresh_token(data: dict[str, Any]) -> str:
+    """Encode a JWT refresh token (type='refresh', 30-day expiry).
+
+    ADR-017: stateless JWT refresh.
+    ADR-021: includes 'jti' claim for revocation tracking.
+    Must NOT be used as an access token — get_current_user() rejects them.
+    """
+    payload = {**data, "type": "refresh"}
+    payload["exp"] = datetime.now(timezone.utc) + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
+    payload["jti"] = secrets.token_hex(16)   # ADR-021: unique revocation token ID
+    return jwt.encode(payload, settings.certportal_jwt_secret, algorithm=ALGORITHM)
+
+
+def decode_refresh_token(token: str) -> dict[str, Any]:
+    """Decode and verify a refresh token.
+
+    Raises:
+        HTTPException 401 — if the token is invalid, expired, or not a refresh token.
+    """
+    payload = decode_token(token)  # validates signature and expiry
+    if payload.get("type") != "refresh":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not a refresh token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return payload
 
 
 def decode_token(token: str) -> dict[str, Any]:
@@ -159,7 +233,34 @@ async def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    return decode_token(token)
+    payload = decode_token(token)
+
+    # ADR-017: reject refresh tokens being used as access tokens.
+    # Tokens without a 'type' claim remain valid (backward compat with Sprint 1–3 tokens).
+    if payload.get("type") == "refresh":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Refresh token cannot be used as an access token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    # ADR-021: revocation check — only when a pool is registered (skipped in tests).
+    # Tokens without a 'jti' claim are not checked (backward compat).
+    jti = payload.get("jti")
+    if jti and _revocation_pool is not None:
+        async with _revocation_pool.acquire() as _conn:
+            revoked = await _conn.fetchval(
+                "SELECT 1 FROM revoked_tokens WHERE jti=$1 AND expires_at > NOW()",
+                jti,
+            )
+        if revoked:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token has been revoked",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+    return payload
 
 
 # ---------------------------------------------------------------------------
@@ -289,10 +390,85 @@ async def authenticate_user(username: str, password: str) -> dict[str, Any] | No
 
 
 def build_token_claims(user_record: dict[str, Any]) -> dict[str, Any]:
-    """Build JWT payload from an authenticated user record."""
+    """Build JWT payload from an authenticated user record.
+
+    The 'type' claim is set to 'access' here and overridden to 'refresh' by
+    create_refresh_token().  get_current_user() rejects tokens with type='refresh'.
+    """
     return {
         "sub": user_record["sub"],
         "role": user_record["role"],
         "retailer_slug": user_record.get("retailer_slug"),
         "supplier_slug": user_record.get("supplier_slug"),
+        "type": "access",
     }
+
+
+# ---------------------------------------------------------------------------
+# Password reset helpers (ADR-023)
+# ---------------------------------------------------------------------------
+
+async def create_password_reset_token(username: str, pool: "asyncpg.Pool") -> str:
+    """Generate a 60-minute single-use password reset token and persist it to DB.
+
+    Returns the raw token string (URL-safe, 43 characters).
+    The token is inserted into password_reset_tokens with ON CONFLICT DO NOTHING
+    to handle the astronomically unlikely case of a collision gracefully.
+    """
+    token = secrets.token_urlsafe(32)
+    expires_at = datetime.now(tz=timezone.utc) + timedelta(minutes=60)
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO password_reset_tokens (token, username, expires_at) "
+            "VALUES ($1, $2, $3) ON CONFLICT (token) DO NOTHING",
+            token,
+            username,
+            expires_at,
+        )
+    return token
+
+
+async def validate_password_reset_token(token: str, pool: "asyncpg.Pool") -> "str | None":
+    """Validate a password reset token and mark it as used.
+
+    Returns the username if the token is valid (exists, not expired, not yet used).
+    Returns None if the token is invalid, expired, or already used.
+
+    The token is marked used=TRUE atomically in the same DB round-trip as the
+    username fetch — prevents a TOCTOU race if the user double-submits.
+    """
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT username FROM password_reset_tokens "
+            "WHERE token=$1 AND expires_at > NOW() AND used=FALSE",
+            token,
+        )
+        if row is None:
+            return None
+        await conn.execute(
+            "UPDATE password_reset_tokens SET used=TRUE WHERE token=$1", token
+        )
+    return row["username"]
+
+
+# ---------------------------------------------------------------------------
+# Revoked tokens cleanup (ADR-025)
+# ---------------------------------------------------------------------------
+
+async def cleanup_expired_revoked_tokens() -> int:
+    """Delete expired JTIs from revoked_tokens. Returns the number of rows deleted.
+
+    No-op and returns 0 when _revocation_pool is None (e.g. in tests).
+    Called by each portal's lifespan cleanup task once per hour (ADR-025).
+    """
+    if _revocation_pool is None:
+        return 0
+    async with _revocation_pool.acquire() as conn:
+        result = await conn.execute(
+            "DELETE FROM revoked_tokens WHERE expires_at < NOW()"
+        )
+    # asyncpg returns "DELETE N" as the command status string
+    try:
+        return int(result.split()[-1])
+    except (ValueError, IndexError):
+        return 0

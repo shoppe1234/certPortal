@@ -1,18 +1,26 @@
 """testing/certportal_jules_test.py — Jules CI Test Orchestrator.
 
-Imports and runs SuiteA through SuiteF. Each suite returns a list of result dicts.
-All suites are stubbed in Sprint 1 (status: SKIP).
+Imports and runs SuiteA through SuiteI. Each suite returns a list of result dicts.
 
 Usage:
-    python testing/certportal_jules_test.py
+    python -m testing.certportal_jules_test
 """
 from __future__ import annotations
 
 import json
 import sys
 from datetime import datetime, timezone
+from pathlib import Path
 
-from testing.suites import suite_a, suite_b, suite_c, suite_d, suite_e, suite_f
+# Load .env from project root so CERTPORTAL_DB_URL (and friends) are available
+# without requiring the caller to pre-export them in the shell.
+try:
+    from dotenv import load_dotenv as _load_dotenv
+    _load_dotenv(Path(__file__).parent.parent / ".env", override=False)
+except ImportError:
+    pass  # python-dotenv not installed — caller must set env vars manually
+
+from testing.suites import suite_a, suite_b, suite_c, suite_d, suite_e, suite_f, suite_g, suite_h, suite_i
 
 SUITES = [
     ("SuiteA — Portal Health & Auth", suite_a),
@@ -21,11 +29,14 @@ SUITES = [
     ("SuiteD — Workspace Scope", suite_d),
     ("SuiteE — HITL Flow", suite_e),
     ("SuiteF — End-to-End Pipeline", suite_f),
+    ("SuiteG — Moses Lifecycle Hook", suite_g),
+    ("SuiteH — Sprint 4 Integration", suite_h),
+    ("SuiteI — Kelly ADK Memory", suite_i),
 ]
 
 
 def run_all() -> dict:
-    """Run all six suites and return a consolidated results dict."""
+    """Run all nine suites and return a consolidated results dict."""
     start = datetime.now(timezone.utc)
     all_results: list[dict] = []
     suite_summaries: list[dict] = []

@@ -214,3 +214,5 @@ body {
 .nav-logout-form { margin: 0; }
 .btn-logout { background: transparent; border: 1px solid var(--color-border); color: var(--color-text-muted); font-size: 13px; padding: 5px 12px; border-radius: var(--radius-sm); cursor: pointer; transition: all var(--transition); white-space: nowrap; font-family: var(--font-sans); }
 .btn-logout:hover { border-color: var(--color-error); color: var(--color-error); background: var(--color-error-light); }
+.btn-nav-account { background: transparent; border: none; color: var(--color-text-muted); font-size: 13px; padding: 5px 12px; border-radius: var(--radius-sm); cursor: pointer; text-decoration: none; white-space: nowrap; font-family: var(--font-sans); transition: color var(--transition); }
+.btn-nav-account:hover { color: var(--color-primary); text-decoration: underline; }

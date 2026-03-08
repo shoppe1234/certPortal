@@ -9,13 +9,16 @@ Auth (ADR-014): JWT cookie or Bearer header. Role required: 'admin' or 'retailer
 """
 from __future__ import annotations
 
+import asyncio
+import json
+import time
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Annotated
 
 import asyncpg
-from fastapi import APIRouter, Depends, FastAPI, Form, HTTPException, Request, status
+from fastapi import APIRouter, Cookie, Depends, FastAPI, Form, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.staticfiles import StaticFiles
@@ -23,15 +26,26 @@ from fastapi.templating import Jinja2Templates
 
 from certportal.core.auth import (
     ACCESS_TOKEN_EXPIRE_MINUTES,
+    REFRESH_TOKEN_EXPIRE_DAYS,
     authenticate_user,
     build_token_claims,
+    cleanup_expired_revoked_tokens,
     create_access_token,
+    create_password_reset_token,
+    create_refresh_token,
+    decode_refresh_token,
+    decode_token,
     get_current_user,
     hash_password,
     require_role,
+    revoke_jti,
+    set_revocation_pool,
+    validate_password_reset_token,
 )
+from certportal.core.email_utils import send_reset_email
 from certportal.core.database import get_connection, get_pool
 from certportal.core.gate_enforcer import GateOrderViolation, get_gate_status, transition_gate
+from certportal.core.workspace import S3AgentWorkspace
 
 BASE_DIR = Path(__file__).parent.parent
 
@@ -43,8 +57,22 @@ BASE_DIR = Path(__file__).parent.parent
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    await get_pool()
-    yield
+    pool = await get_pool()
+    set_revocation_pool(pool)   # ADR-021: register pool for JWT revocation checks
+
+    async def _cleanup_loop():
+        """Hourly background task: purge expired JTIs from revoked_tokens (ADR-025)."""
+        await cleanup_expired_revoked_tokens()  # immediate first pass on startup
+        while True:
+            await asyncio.sleep(3600)
+            await cleanup_expired_revoked_tokens()
+
+    task = asyncio.create_task(_cleanup_loop())
+    try:
+        yield
+    finally:
+        task.cancel()
+        set_revocation_pool(None)
 
 
 # ---------------------------------------------------------------------------
@@ -121,6 +149,7 @@ async def login_page(request: Request, error: str = ""):
     <div class="sep"><label>Password</label><input name="password" type="password" autocomplete="current-password" required></div>
     <button type="submit">Sign in</button>
   </form>
+  <p style="margin-top:.8rem;text-align:right;font-size:.78rem"><a href="/forgot-password" style="color:#4f6ef7;text-decoration:none">Forgot password?</a></p>
 </div>
 </body>
 </html>""")
@@ -138,11 +167,46 @@ async def login_for_access_token(
     if user.get("role") not in ("admin", "retailer"):
         return RedirectResponse(url="/login?error=Retailer+or+admin+role+required", status_code=302)
 
-    token = create_access_token(build_token_claims(user))
+    claims = build_token_claims(user)
+    token = create_access_token(claims)
+    refresh_token = create_refresh_token(claims)
     response = RedirectResponse(url="/", status_code=302)
     response.set_cookie(
         key="access_token",
         value=token,
+        httponly=True,
+        samesite="lax",
+        max_age=ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+    )
+    response.set_cookie(
+        key="refresh_token",
+        value=refresh_token,
+        httponly=True,
+        samesite="lax",
+        max_age=REFRESH_TOKEN_EXPIRE_DAYS * 86400,
+    )
+    return response
+
+
+@app.post("/token/refresh")
+async def refresh_access_token(
+    refresh_token: str | None = Cookie(default=None),
+):
+    """Issue a new access token from a valid refresh token (ADR-017)."""
+    if not refresh_token:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="No refresh token")
+    claims = decode_refresh_token(refresh_token)
+    user_record = {
+        "sub": claims["sub"],
+        "role": claims["role"],
+        "retailer_slug": claims.get("retailer_slug"),
+        "supplier_slug": claims.get("supplier_slug"),
+    }
+    access_token = create_access_token(build_token_claims(user_record))
+    response = JSONResponse({"access_token": access_token, "token_type": "bearer"})
+    response.set_cookie(
+        key="access_token",
+        value=access_token,
         httponly=True,
         samesite="lax",
         max_age=ACCESS_TOKEN_EXPIRE_MINUTES * 60,
@@ -161,10 +225,142 @@ async def api_token(form_data: OAuth2PasswordRequestForm = Depends()):
 
 
 @app.post("/logout")
-async def logout():
+async def logout(access_token: str | None = Cookie(default=None)):
+    """Clear auth cookies and revoke the token's JTI in revoked_tokens (ADR-021)."""
     response = RedirectResponse(url="/login", status_code=302)
     response.delete_cookie("access_token")
+    response.delete_cookie("refresh_token")   # also clear refresh (fix Sprint 4 gap)
+    if access_token:
+        try:
+            payload = decode_token(access_token)
+            await revoke_jti(payload.get("jti"), payload.get("exp"))
+        except Exception:
+            pass  # expired/malformed token — clear cookies regardless
     return response
+
+
+# ---------------------------------------------------------------------------
+# Open endpoints: Password reset (ADR-023)
+# ---------------------------------------------------------------------------
+
+_MEREDITH_RESET_CSS = (
+    "body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;"
+    "background:#f8f9fc;color:#1a1f36;display:flex;align-items:center;"
+    "justify-content:center;min-height:100vh;margin:0}"
+    ".card{background:#fff;padding:2.5rem;border-radius:8px;width:380px;"
+    "box-shadow:0 2px 12px rgba(0,0,0,.08);border:1px solid #e8ecf5}"
+    "h1{color:#4f6ef7;font-size:1.3rem;margin:0 0 1.5rem}"
+    "label{display:block;font-size:.8rem;color:#6b7280;margin-bottom:.25rem;font-weight:500}"
+    "input{width:100%;box-sizing:border-box;padding:.6rem .75rem;background:#fff;"
+    "border:1px solid #e8ecf5;border-radius:6px;color:#1a1f36;font-size:.9rem;"
+    "margin-bottom:.9rem}"
+    "button{width:100%;margin-top:.2rem;padding:.7rem;background:#4f6ef7;color:#fff;"
+    "border:none;border-radius:6px;font-weight:600;font-size:.95rem;cursor:pointer}"
+    "button:hover{background:#3b5bd9}"
+    ".err{color:#e53e3e;margin-bottom:1rem;font-size:.9rem}"
+    ".back{margin-top:1rem;font-size:.82rem}"
+    ".back a{color:#4f6ef7;text-decoration:none}"
+)
+
+
+@app.get("/forgot-password", response_class=HTMLResponse)
+async def forgot_password_form(error: str = ""):
+    """Render the forgot-password form (username field, retailer theme)."""
+    err_html = f'<p class="err">{error}</p>' if error else ""
+    return HTMLResponse(f"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<title>certPortal Retailer - Forgot Password</title>
+<style>{_MEREDITH_RESET_CSS}</style></head>
+<body><div class="card">
+  <h1>certPortal &middot; Forgot Password</h1>
+  {err_html}
+  <p style="color:#6b7280;font-size:.85rem;margin-bottom:1.2rem">
+    Enter your username and we will email a reset link if an address is on file.
+  </p>
+  <form method="post" action="/forgot-password">
+    <label>Username</label>
+    <input name="username" autocomplete="username" required>
+    <button type="submit">Send Reset Link</button>
+  </form>
+  <p class="back"><a href="/login">&#8592; Back to login</a></p>
+</div></body></html>""")
+
+
+@app.post("/forgot-password")
+async def forgot_password_submit(request: Request, username: str = Form(...)):
+    """Generate a reset token and email it. Always redirects to reset_sent (no enumeration)."""
+    pool = await get_pool()
+    row = await pool.fetchrow(
+        "SELECT email FROM portal_users WHERE username=$1 AND is_active=TRUE", username
+    )
+    if row and row["email"]:
+        token = await create_password_reset_token(username, pool)
+        reset_link = f"{request.base_url}reset-password?token={token}"
+        send_reset_email(row["email"], reset_link, "Retailer")
+    return RedirectResponse(url="/login?msg=reset_sent", status_code=302)
+
+
+@app.get("/reset-password", response_class=HTMLResponse)
+async def reset_password_form(token: str, error: str = ""):
+    """Show the new-password form if the token is valid (peek - does NOT mark used)."""
+    pool = await get_pool()
+    row = await pool.fetchrow(
+        "SELECT 1 FROM password_reset_tokens "
+        "WHERE token=$1 AND expires_at > NOW() AND used=FALSE",
+        token,
+    )
+    if row is None:
+        return RedirectResponse(url="/forgot-password?error=Reset+link+is+invalid+or+expired", status_code=302)
+    err_html = f'<p class="err">{error}</p>' if error else ""
+    return HTMLResponse(f"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<title>certPortal Retailer - Reset Password</title>
+<style>{_MEREDITH_RESET_CSS}</style></head>
+<body><div class="card">
+  <h1>certPortal &middot; Reset Password</h1>
+  {err_html}
+  <form method="post" action="/reset-password">
+    <input type="hidden" name="token" value="{token}">
+    <label>New Password (min 8 characters)</label>
+    <input name="new_password" type="password" autocomplete="new-password" required minlength="8">
+    <label>Confirm New Password</label>
+    <input name="confirm_password" type="password" autocomplete="new-password" required>
+    <button type="submit">Set New Password</button>
+  </form>
+</div></body></html>""")
+
+
+@app.post("/reset-password")
+async def reset_password_submit(
+    token: str = Form(...),
+    new_password: str = Form(...),
+    confirm_password: str = Form(...),
+):
+    """Validate token, update password, mark token used."""
+    if new_password != confirm_password:
+        return RedirectResponse(
+            url=f"/reset-password?token={token}&error=Passwords+do+not+match",
+            status_code=302,
+        )
+    if len(new_password) < 8:
+        return RedirectResponse(
+            url=f"/reset-password?token={token}&error=Password+must+be+at+least+8+characters",
+            status_code=302,
+        )
+    pool = await get_pool()
+    username = await validate_password_reset_token(token, pool)
+    if username is None:
+        return RedirectResponse(
+            url="/forgot-password?error=Reset+link+is+invalid+or+expired",
+            status_code=302,
+        )
+    new_hash = hash_password(new_password)
+    await pool.execute(
+        "UPDATE portal_users SET hashed_password=$1, updated_at=NOW() WHERE username=$2",
+        new_hash,
+        username,
+    )
+    return RedirectResponse(url="/login?msg=password_changed", status_code=302)
 
 
 # ---------------------------------------------------------------------------
@@ -254,7 +450,17 @@ async def trigger_spec_upload(
     if not pdf_s3_key or not retailer_slug:
         raise HTTPException(status_code=400, detail="pdf_s3_key and retailer_slug required")
 
-    # TODO: call agent via workspace signal
+    # INV-07: trigger Dwight via S3 workspace signal, never by direct import
+    ws = S3AgentWorkspace(retailer_slug, "system")
+    ts = int(time.time())
+    ws.upload(
+        f"signals/dwight_trigger_{ts}.json",
+        json.dumps({
+            "type": "dwight_spec_analysis",
+            "pdf_s3_key": pdf_s3_key,
+            "retailer_slug": retailer_slug,
+        }),
+    )
     return JSONResponse(
         {
             "status": "queued",
@@ -303,25 +509,49 @@ async def yaml_wizard(
 
 @router.post("/yaml-wizard/path1")
 async def yaml_wizard_path1(request: Request, user: dict = Depends(get_current_user)):
-    """Path 1: Trigger Andy PDF extraction via workspace signal."""
+    """Path 1: Trigger Andy PDF extraction via workspace signal (INV-07)."""
     body = await request.json()
-    # TODO: call agent via workspace signal
+    retailer_slug = body.get("retailer_slug") or user.get("retailer_slug")
+    if not retailer_slug:
+        raise HTTPException(status_code=400, detail="retailer_slug required")
+    ws = S3AgentWorkspace(retailer_slug, "system")
+    ts = int(time.time())
+    ws.upload(
+        f"signals/andy_path1_trigger_{ts}.json",
+        json.dumps({"type": "andy_yaml_path1", "retailer_slug": retailer_slug, **body}),
+    )
     return JSONResponse({"status": "queued", "path": 1, "payload": body})
 
 
 @router.post("/yaml-wizard/path2")
 async def yaml_wizard_path2(request: Request, user: dict = Depends(get_current_user)):
-    """Path 2: Trigger Andy YAML upload validation via workspace signal."""
+    """Path 2: Trigger Andy YAML upload validation via workspace signal (INV-07)."""
     body = await request.json()
-    # TODO: call agent via workspace signal
+    retailer_slug = body.get("retailer_slug") or user.get("retailer_slug")
+    if not retailer_slug:
+        raise HTTPException(status_code=400, detail="retailer_slug required")
+    ws = S3AgentWorkspace(retailer_slug, "system")
+    ts = int(time.time())
+    ws.upload(
+        f"signals/andy_path2_trigger_{ts}.json",
+        json.dumps({"type": "andy_yaml_path2", "retailer_slug": retailer_slug, **body}),
+    )
     return JSONResponse({"status": "queued", "path": 2, "payload": body})
 
 
 @router.post("/yaml-wizard/path3")
 async def yaml_wizard_path3(request: Request, user: dict = Depends(get_current_user)):
-    """Path 3: Trigger Andy wizard form serialization via workspace signal."""
+    """Path 3: Trigger Andy wizard form serialization via workspace signal (INV-07)."""
     body = await request.json()
-    # TODO: call agent via workspace signal
+    retailer_slug = body.get("retailer_slug") or user.get("retailer_slug")
+    if not retailer_slug:
+        raise HTTPException(status_code=400, detail="retailer_slug required")
+    ws = S3AgentWorkspace(retailer_slug, "system")
+    ts = int(time.time())
+    ws.upload(
+        f"signals/andy_path3_trigger_{ts}.json",
+        json.dumps({"type": "andy_yaml_path3", "retailer_slug": retailer_slug, **body}),
+    )
     return JSONResponse({"status": "queued", "path": 3, "payload": body})
 
 
