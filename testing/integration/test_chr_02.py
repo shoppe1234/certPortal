@@ -24,7 +24,7 @@ from pathlib import Path
 import pytest
 from playwright.sync_api import Page
 
-from .conftest import browser_login, hitl
+from .conftest import assert_status, browser_login, hitl
 
 pytestmark = [
     pytest.mark.live_portals,
@@ -138,7 +138,7 @@ class TestCHR02:
         assert count >= 1, "Expected ≥1 PASS row in test_occurrences"
 
         r = chrissy.get("/scenarios", headers={"Authorization": f"Bearer {supplier_token}"})
-        assert r.status_code == 200
+        assert_status(r, 200, msg="GET /scenarios after Moses 850 PASS")
         assert "PASS" in r.text
 
     @pytest.mark.hitl

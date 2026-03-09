@@ -14,9 +14,9 @@ from __future__ import annotations
 import pytest
 from playwright.sync_api import Page, expect
 
-from .conftest import browser_login, hitl
+from .conftest import assert_status, browser_login, hitl
 
-pytestmark = [pytest.mark.live_portals, pytest.mark.live_db, pytest.mark.p1]
+pytestmark = [pytest.mark.live_portals, pytest.mark.live_db, pytest.mark.p1, pytest.mark.serial]
 
 PAM_URL = "http://localhost:8000"
 
@@ -49,7 +49,7 @@ class TestPAM04:
     def test_monica_memory_accessible(self, pam, admin_token):
         """GET /monica-memory returns 200 for admin."""
         r = pam.get("/monica-memory", headers={"Authorization": f"Bearer {admin_token}"})
-        assert r.status_code == 200
+        assert_status(r, 200, msg="GET /monica-memory admin accessible")
 
     def test_monica_memory_requires_auth(self, pam):
         """GET /monica-memory without token → redirect."""
@@ -62,7 +62,7 @@ class TestPAM04:
             "/monica-memory?page=1&limit=2",
             headers={"Authorization": f"Bearer {admin_token}"},
         )
-        assert r.status_code == 200
+        assert_status(r, 200, msg="GET /monica-memory?page=1&limit=2 pagination")
         # Pagination metadata should be present in rendered HTML
         assert "page" in r.text or "total" in r.text
 
@@ -83,20 +83,20 @@ class TestPAM04:
     def test_forgot_password_page_renders(self, pam):
         """GET /forgot-password returns 200 HTML form."""
         r = pam.get("/forgot-password")
-        assert r.status_code == 200
+        assert_status(r, 200, msg="GET /forgot-password page renders")
         assert "Forgot Password" in r.text or "forgot" in r.text.lower()
 
     def test_forgot_password_unknown_user_no_enumeration(self, pam):
         """Unknown username → same redirect as valid username (no enumeration)."""
         r = pam.post("/forgot-password", data={"username": "nonexistent_user_xyz"})
-        assert r.status_code == 302
+        assert_status(r, 302, msg="POST /forgot-password unknown user no enumeration")
         loc = r.headers.get("location", "")
         assert "reset_sent" in loc
 
     def test_forgot_password_valid_user_redirects(self, pam):
         """Valid username → 302 to /login?msg=reset_sent."""
         r = pam.post("/forgot-password", data={"username": "pam_admin"})
-        assert r.status_code == 302
+        assert_status(r, 302, msg="POST /forgot-password valid user redirect")
         loc = r.headers.get("location", "")
         assert "reset_sent" in loc
 
@@ -119,7 +119,7 @@ class TestPAM04:
     def test_invalid_reset_token_redirects_back(self, pam):
         """GET /reset-password with bad token → redirect to /forgot-password?error=..."""
         r = pam.get("/reset-password?token=invalid-token-xyz")
-        assert r.status_code == 302
+        assert_status(r, 302, msg="GET /reset-password invalid token redirect")
         loc = r.headers.get("location", "")
         assert "error=" in loc or "forgot-password" in loc
 
@@ -139,7 +139,7 @@ class TestPAM04:
         token = row[0]
 
         r = pam.get(f"/reset-password?token={token}")
-        assert r.status_code == 200
+        assert_status(r, 200, msg="GET /reset-password valid token shows form")
         assert "new_password" in r.text.lower() or "password" in r.text.lower()
 
     @pytest.mark.hitl

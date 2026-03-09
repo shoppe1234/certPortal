@@ -1,8 +1,17 @@
 """testing/certportal_jules_test.py — Jules CI Test Orchestrator.
 
-Imports and runs SuiteA through SuiteI. Each suite returns a list of result dicts.
+**DEPRECATED** — This legacy runner is superseded by pytest.
+All 103 tests from Suites A–I have been migrated to testing/unit/ and can be
+run with:
 
-Usage:
+    pytest testing/unit/ -v
+
+This file is kept for reference only. It will be removed in a future cleanup PR.
+
+Original description:
+    Imports and runs SuiteA through SuiteI. Each suite returns a list of result dicts.
+
+Usage (deprecated):
     python -m testing.certportal_jules_test
 """
 from __future__ import annotations

@@ -23,9 +23,9 @@ from __future__ import annotations
 import pytest
 from playwright.sync_api import Page, expect
 
-from .conftest import browser_login, hitl
+from .conftest import assert_status, browser_login, hitl
 
-pytestmark = [pytest.mark.live_portals, pytest.mark.live_db, pytest.mark.p1]
+pytestmark = [pytest.mark.live_portals, pytest.mark.live_db, pytest.mark.p1, pytest.mark.serial]
 
 PAM_URL = "http://localhost:8000"
 MER_URL = "http://localhost:8001"
@@ -45,7 +45,10 @@ class TestE2E03:
         """Remove bolt supplier data before and after test."""
         self._clean(db)
         yield
-        self._clean(db)
+        try:
+            self._clean(db)
+        except Exception:
+            db.rollback()
 
     def _clean(self, db):
         cur = db.cursor()
@@ -61,7 +64,7 @@ class TestE2E03:
     def test_register_page_accessible(self, pam, admin_token):
         """GET /register → 200 HTML form (admin-protected)."""
         r = pam.get("/register", headers=self._admin_auth(admin_token))
-        assert r.status_code == 200
+        assert_status(r, 200, msg="GET /register admin-protected page")
         assert "Register" in r.text
 
     def test_register_requires_auth(self, pam):
@@ -84,7 +87,7 @@ class TestE2E03:
             cookies={"access_token": admin_token},
         )
         # Should redirect to /register?msg=...registered+successfully
-        assert r.status_code == 302
+        assert_status(r, 302, msg="POST /register new supplier form submit")
         loc = r.headers.get("location", "")
         assert "registered" in loc or "msg=" in loc
 
@@ -128,7 +131,7 @@ class TestE2E03:
             },
             cookies={"access_token": admin_token},
         )
-        assert r.status_code == 302
+        assert_status(r, 302, msg="POST /register duplicate username rejected")
         loc = r.headers.get("location", "")
         assert "error=" in loc or "taken" in loc.lower()
 
@@ -146,7 +149,7 @@ class TestE2E03:
             },
             cookies={"access_token": admin_token},
         )
-        assert r.status_code == 302
+        assert_status(r, 302, msg="POST /register invalid role rejected")
         loc = r.headers.get("location", "")
         assert "error=" in loc
 
@@ -173,7 +176,7 @@ class TestE2E03:
             "/token/api",
             data={"username": NEW_SUPPLIER_USER, "password": NEW_SUPPLIER_PASS},
         )
-        assert r.status_code == 200
+        assert_status(r, 200, msg="POST /token/api new bolt_supplier login")
         assert "access_token" in r.json()
 
     # ── Gate progression ──────────────────────────────────────────────────────
@@ -194,19 +197,19 @@ class TestE2E03:
 
         # Gate 1 via Meredith approve-gate
         r1 = mer.post(f"/suppliers/bolt/approve-gate/1", headers=self._admin_auth(admin_token))
-        assert r1.status_code == 200
+        assert_status(r1, 200, msg="POST /suppliers/bolt/approve-gate/1")
 
         # Gate 2
         r2 = mer.post(f"/suppliers/bolt/approve-gate/2", headers=self._admin_auth(admin_token))
-        assert r2.status_code == 200
+        assert_status(r2, 200, msg="POST /suppliers/bolt/approve-gate/2")
 
         # Gate 3
         r3 = mer.post(f"/suppliers/bolt/approve-gate/3", headers=self._admin_auth(admin_token))
-        assert r3.status_code == 200
+        assert_status(r3, 200, msg="POST /suppliers/bolt/approve-gate/3")
 
         # Certify
         r_cert = pam.post(f"/suppliers/bolt/gate/3/certify", headers=self._admin_auth(admin_token))
-        assert r_cert.status_code == 200
+        assert_status(r_cert, 200, msg="POST /suppliers/bolt/gate/3/certify")
         assert r_cert.json()["status"] == "certified"
 
         # DB: gate_3=CERTIFIED

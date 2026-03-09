@@ -27,13 +27,14 @@ from pathlib import Path
 import pytest
 from playwright.sync_api import Page
 
-from .conftest import browser_login, hitl
+from .conftest import assert_status, browser_login, hitl
 
 pytestmark = [
     pytest.mark.live_portals,
     pytest.mark.live_db,
     pytest.mark.live_s3,
     pytest.mark.p0,
+    pytest.mark.serial,
 ]
 
 RETAILER = "lowes"
@@ -72,17 +73,21 @@ class TestE2E01:
     @pytest.fixture(autouse=True)
     def clean_state(self, db, s3_client, raw_edi_bucket):
         """Reset gates to PENDING before test."""
-        cur = db.cursor()
-        cur.execute(
-            """
-            INSERT INTO hitl_gate_status (supplier_id, gate_1, gate_2, gate_3, last_updated_by)
-            VALUES ('acme','PENDING','PENDING','PENDING','e2e_reset')
-            ON CONFLICT (supplier_id) DO UPDATE
-                SET gate_1='PENDING',gate_2='PENDING',gate_3='PENDING',
-                    last_updated=NOW(),last_updated_by='e2e_reset'
-            """
-        )
-        db.commit()
+        try:
+            cur = db.cursor()
+            cur.execute(
+                """
+                INSERT INTO hitl_gate_status (supplier_id, gate_1, gate_2, gate_3, last_updated_by)
+                VALUES ('acme','PENDING','PENDING','PENDING','e2e_reset')
+                ON CONFLICT (supplier_id) DO UPDATE
+                    SET gate_1='PENDING',gate_2='PENDING',gate_3='PENDING',
+                        last_updated=NOW(),last_updated_by='e2e_reset'
+                """
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
 
         # Ensure THESIS.md present
         try:
@@ -121,7 +126,7 @@ class TestE2E01:
             f"/suppliers/{SUPPLIER}/approve-gate/1",
             headers=_retailer_auth(retailer_token),
         )
-        assert r.status_code == 200
+        assert_status(r, 200, msg="POST /suppliers/acme/approve-gate/1 retailer")
         body = r.json()
         assert body["status"] == "ok"
         assert body["gate"] == 1
@@ -156,7 +161,7 @@ class TestE2E01:
             f"/suppliers/{SUPPLIER}/approve-gate/2",
             headers=_retailer_auth(retailer_token),
         )
-        assert r.status_code == 200
+        assert_status(r, 200, msg="POST /suppliers/acme/approve-gate/2 retailer")
 
     def test_856_and_810_pass(self, db):
         """Steps 6-7: Moses validates 856 + 810."""
@@ -182,14 +187,14 @@ class TestE2E01:
             f"/suppliers/{SUPPLIER}/approve-gate/3",
             headers=_retailer_auth(retailer_token),
         )
-        assert r.status_code == 200
+        assert_status(r, 200, msg="POST /suppliers/acme/approve-gate/3 retailer")
 
         # Certify via Pam
         r_cert = pam.post(
             f"/suppliers/{SUPPLIER}/gate/3/certify",
             headers=_admin_auth(admin_token),
         )
-        assert r_cert.status_code == 200
+        assert_status(r_cert, 200, msg="POST /suppliers/acme/gate/3/certify admin")
         assert r_cert.json()["status"] == "certified"
 
     def test_certification_visible_in_chrissy(self, chrissy, supplier_token, db):
@@ -202,7 +207,7 @@ class TestE2E01:
             pytest.skip("Supplier not certified — run full E2E flow first")
 
         r = chrissy.get("/certification", headers={"Authorization": f"Bearer {supplier_token}"})
-        assert r.status_code == 200
+        assert_status(r, 200, msg="GET /certification chrissy supplier")
         assert "CERTIFIED" in r.text or "certified" in r.text.lower()
 
     @pytest.mark.hitl

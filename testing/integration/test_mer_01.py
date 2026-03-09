@@ -25,7 +25,7 @@ import re
 import pytest
 from playwright.sync_api import Page, expect
 
-from .conftest import browser_login, hitl
+from .conftest import assert_status, browser_login, hitl
 
 pytestmark = [pytest.mark.live_portals, pytest.mark.live_db, pytest.mark.p0]
 
@@ -55,7 +55,7 @@ class TestMER01:
 
     def test_health(self, mer):
         r = mer.get("/health")
-        assert r.status_code == 200
+        assert_status(r, 200, msg="GET /health meredith")
         assert r.json() == {"status": "ok", "portal": "meredith", "version": "1.0.0"}
 
     def test_retailer_token(self, mer):
@@ -64,7 +64,7 @@ class TestMER01:
             "/token/api",
             data={"username": "lowes_retailer", "password": "certportal_retailer"},
         )
-        assert r.status_code == 200
+        assert_status(r, 200, msg="POST /token/api retailer login")
         assert "access_token" in r.json()
 
     def test_retailer_jwt_claims(self, retailer_token):
@@ -84,45 +84,45 @@ class TestMER01:
             "/token/api",
             data={"username": "acme_supplier", "password": "certportal_supplier"},
         )
-        assert r.status_code == 200  # Token issues fine
+        assert_status(r, 200, msg="POST /token/api supplier token issues on retailer portal")
         token = r.json()["access_token"]
 
         # But supplier token must be blocked on retailer-protected routes
         r2 = mer.get("/", headers={"Authorization": f"Bearer {token}"})
-        assert r2.status_code == 403
+        assert_status(r2, 403, msg="GET / supplier token blocked on retailer portal")
 
     def test_admin_allowed_on_retailer_portal(self, mer, admin_token):
         """Admin token accepted on retailer portal (admin role permitted everywhere)."""
         r = mer.get("/", headers={"Authorization": f"Bearer {admin_token}"})
-        assert r.status_code == 200
+        assert_status(r, 200, msg="GET / admin token allowed on retailer portal")
 
     def test_retailer_token_blocked_on_supplier_portal(self, chrissy, retailer_token):
         """Retailer token rejected on Chrissy supplier-protected route → 403."""
         r = chrissy.get("/scenarios", headers={"Authorization": f"Bearer {retailer_token}"})
-        assert r.status_code == 403
+        assert_status(r, 403, msg="GET /scenarios retailer token blocked on supplier portal")
 
     def test_retailer_dashboard(self, mer, retailer_token):
         """GET / returns 200 with spec, supplier_count, certified_count."""
         r = mer.get("/", headers={"Authorization": f"Bearer {retailer_token}"})
-        assert r.status_code == 200
+        assert_status(r, 200, msg="GET / retailer dashboard")
 
     def test_spec_setup_page(self, mer, retailer_token):
         """GET /spec-setup → 200, shows seeded spec."""
         r = mer.get("/spec-setup", headers={"Authorization": f"Bearer {retailer_token}"})
-        assert r.status_code == 200
+        assert_status(r, 200, msg="GET /spec-setup retailer page")
         assert "lowes" in r.text or "v2.0-test" in r.text
 
     def test_yaml_wizard_page(self, mer, retailer_token):
         """GET /yaml-wizard → 200, includes supported_bundles."""
         r = mer.get("/yaml-wizard", headers={"Authorization": f"Bearer {retailer_token}"})
-        assert r.status_code == 200
+        assert_status(r, 200, msg="GET /yaml-wizard retailer page")
         assert "general_merchandise" in r.text
         assert "850" in r.text
 
     def test_supplier_status_page(self, mer, retailer_token):
         """GET /supplier-status → 200."""
         r = mer.get("/supplier-status", headers={"Authorization": f"Bearer {retailer_token}"})
-        assert r.status_code == 200
+        assert_status(r, 200, msg="GET /supplier-status retailer page")
 
     # ── Browser layer ────────────────────────────────────────────────────────
 

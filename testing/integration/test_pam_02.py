@@ -20,9 +20,9 @@ import time
 import pytest
 from playwright.sync_api import Page, expect
 
-from .conftest import browser_login, hitl
+from .conftest import assert_status, browser_login, hitl
 
-pytestmark = [pytest.mark.live_portals, pytest.mark.live_db, pytest.mark.live_s3, pytest.mark.p0]
+pytestmark = [pytest.mark.live_portals, pytest.mark.live_db, pytest.mark.live_s3, pytest.mark.p0, pytest.mark.serial]
 
 PAM_URL = "http://localhost:8000"
 APPROVE_ID = "test-queue-approve"
@@ -35,7 +35,7 @@ class TestPAM02:
     def test_hitl_queue_page_accessible(self, pam, admin_token):
         """GET /hitl-queue returns 200 for admin."""
         r = pam.get("/hitl-queue", headers={"Authorization": f"Bearer {admin_token}"})
-        assert r.status_code == 200
+        assert_status(r, 200, msg="GET /hitl-queue admin accessible")
 
     def test_hitl_queue_requires_auth(self, pam):
         """GET /hitl-queue without token → redirect to login."""
@@ -48,7 +48,7 @@ class TestPAM02:
             "/hitl-queue/nonexistent-99999/approve",
             headers={"Authorization": f"Bearer {admin_token}"},
         )
-        assert r.status_code == 404
+        assert_status(r, 404, msg="POST /hitl-queue/{id}/approve not found")
 
     def test_approve_hitl_item(self, pam, admin_token, db, s3_client, workspace_bucket):
         """Approve queued item → status='APPROVED', S3 signal written."""
@@ -56,7 +56,7 @@ class TestPAM02:
             f"/hitl-queue/{APPROVE_ID}/approve",
             headers={"Authorization": f"Bearer {admin_token}"},
         )
-        assert r.status_code == 200
+        assert_status(r, 200, msg="POST /hitl-queue/{id}/approve success")
         body = r.json()
         assert body["status"] == "approved"
         assert body["queue_id"] == APPROVE_ID
@@ -98,7 +98,7 @@ class TestPAM02:
             f"/hitl-queue/{REJECT_ID}/reject",
             headers={"Authorization": f"Bearer {admin_token}"},
         )
-        assert r.status_code == 200
+        assert_status(r, 200, msg="POST /hitl-queue/{id}/reject success")
         body = r.json()
         assert body["status"] == "rejected"
         assert body["queue_id"] == REJECT_ID
@@ -128,6 +128,6 @@ class TestPAM02:
         db.commit()
 
         r = pam.get("/hitl-queue", headers={"Authorization": f"Bearer {admin_token}"})
-        assert r.status_code == 200
+        assert_status(r, 200, msg="GET /hitl-queue shows pending items")
         # The page should render the pending item (text-based check)
         assert "test-pending-check" in r.text or "PENDING" in r.text

@@ -20,7 +20,7 @@ import re
 import pytest
 from playwright.sync_api import Page, expect
 
-from .conftest import browser_login, hitl
+from .conftest import assert_status, browser_login, hitl
 
 pytestmark = [pytest.mark.live_portals, pytest.mark.live_db, pytest.mark.p0]
 
@@ -34,30 +34,30 @@ class TestPAM01:
 
     def test_health(self, pam):
         r = pam.get("/health")
-        assert r.status_code == 200
+        assert_status(r, 200, msg="GET /health pam")
         assert r.json() == {"status": "ok", "portal": "pam", "version": "1.0.0"}
 
     def test_wrong_password_browser_redirect(self, pam):
         """Browser login with wrong password → 302 to /login?error=..."""
         r = pam.post("/token", data={"username": "pam_admin", "password": "wrong_password_123"})
-        assert r.status_code == 302
+        assert_status(r, 302, msg="POST /token wrong password browser redirect")
         loc = r.headers.get("location", "")
         assert "error=" in loc or "Invalid" in loc
 
     def test_supplier_token_blocked_on_admin_portal(self, pam, supplier_token):
         """Supplier JWT rejected on admin-only route → 403."""
         r = pam.get("/retailers", headers={"Authorization": f"Bearer {supplier_token}"})
-        assert r.status_code == 403
+        assert_status(r, 403, msg="GET /retailers supplier token blocked on admin portal")
 
     def test_retailer_token_blocked_on_admin_portal(self, pam, retailer_token):
         """Retailer JWT rejected on admin-only route → 403."""
         r = pam.get("/retailers", headers={"Authorization": f"Bearer {retailer_token}"})
-        assert r.status_code == 403
+        assert_status(r, 403, msg="GET /retailers retailer token blocked on admin portal")
 
     def test_api_token_returns_json(self, pam):
         """/token/api returns JSON with access_token + token_type."""
         r = pam.post("/token/api", data={"username": "pam_admin", "password": "certportal_admin"})
-        assert r.status_code == 200
+        assert_status(r, 200, msg="POST /token/api admin login")
         body = r.json()
         assert "access_token" in body
         assert body["token_type"] == "bearer"
@@ -87,7 +87,7 @@ class TestPAM01:
         """Login → logout → reuse access_token → should be rejected. JTI in revoked_tokens."""
         # Get a fresh token via form login to capture cookie
         r = pam.post("/token", data={"username": "pam_admin", "password": "certportal_admin"})
-        assert r.status_code == 302
+        assert_status(r, 302, msg="POST /token form login for revocation test")
         cookie_val = r.cookies.get("access_token")
         assert cookie_val, "access_token cookie must be set after login"
 
@@ -99,7 +99,7 @@ class TestPAM01:
 
         # Logout — should revoke cookie and insert JTI
         logout_resp = pam.post("/logout", cookies={"access_token": cookie_val})
-        assert logout_resp.status_code == 302
+        assert_status(logout_resp, 302, msg="POST /logout revoke token")
 
         # Verify JTI was inserted into revoked_tokens
         cur = db.cursor()
@@ -110,7 +110,7 @@ class TestPAM01:
     def test_cross_portal_role_rejection_json(self, pam):
         """/token/api returns 401 for invalid credentials (JSON response)."""
         r = pam.post("/token/api", data={"username": "pam_admin", "password": "TOTALLY_WRONG"})
-        assert r.status_code == 401
+        assert_status(r, 401, msg="POST /token/api invalid credentials")
         assert "Invalid" in r.json().get("detail", "")
 
     # ── Browser layer ────────────────────────────────────────────────────────

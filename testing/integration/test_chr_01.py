@@ -22,7 +22,7 @@ import json
 import pytest
 from playwright.sync_api import Page, expect
 
-from .conftest import browser_login, hitl
+from .conftest import assert_status, browser_login, hitl
 
 pytestmark = [pytest.mark.live_portals, pytest.mark.live_db, pytest.mark.p0]
 
@@ -68,7 +68,7 @@ class TestCHR01:
 
     def test_health(self, chrissy):
         r = chrissy.get("/health")
-        assert r.status_code == 200
+        assert_status(r, 200, msg="GET /health chrissy")
         assert r.json() == {"status": "ok", "portal": "chrissy", "version": "1.0.0"}
 
     def test_supplier_login(self, chrissy):
@@ -77,7 +77,7 @@ class TestCHR01:
             "/token/api",
             data={"username": "acme_supplier", "password": "certportal_supplier"},
         )
-        assert r.status_code == 200
+        assert_status(r, 200, msg="POST /token/api supplier login")
         assert "access_token" in r.json()
 
     def test_supplier_jwt_claims(self, supplier_token):
@@ -94,42 +94,42 @@ class TestCHR01:
     def test_retailer_token_blocked_on_supplier_portal(self, chrissy, retailer_token):
         """Retailer JWT → 403 on supplier-only route."""
         r = chrissy.get("/scenarios", headers=self._auth(retailer_token))
-        assert r.status_code == 403
+        assert_status(r, 403, msg="GET /scenarios retailer token blocked on supplier portal")
 
     def test_admin_token_allowed_on_supplier_portal(self, chrissy, admin_token):
         """Admin token → 200 on supplier portal (admin has universal access)."""
         r = chrissy.get("/", headers=self._auth(admin_token))
-        assert r.status_code == 200
+        assert_status(r, 200, msg="GET / admin token on supplier portal")
 
     def test_supplier_blocked_on_admin_portal(self, pam, supplier_token):
         """Supplier JWT → 403 on Pam admin-only route."""
         r = pam.get("/retailers", headers=self._auth(supplier_token))
-        assert r.status_code == 403
+        assert_status(r, 403, msg="GET /retailers supplier token blocked on admin portal")
 
     def test_dashboard_accessible(self, chrissy, supplier_token):
         """GET / with supplier token → 200 HTML."""
         r = chrissy.get("/", headers=self._auth(supplier_token))
-        assert r.status_code == 200
+        assert_status(r, 200, msg="GET / supplier dashboard")
 
     def test_scenarios_page_accessible(self, chrissy, supplier_token):
         """GET /scenarios with supplier token → 200 HTML."""
         r = chrissy.get("/scenarios", headers=self._auth(supplier_token))
-        assert r.status_code == 200
+        assert_status(r, 200, msg="GET /scenarios supplier")
 
     def test_certification_page_accessible(self, chrissy, supplier_token):
         """GET /certification with supplier token → 200 HTML."""
         r = chrissy.get("/certification", headers=self._auth(supplier_token))
-        assert r.status_code == 200
+        assert_status(r, 200, msg="GET /certification supplier")
 
     def test_errors_page_accessible(self, chrissy, supplier_token):
         """GET /errors with supplier token → 200 HTML."""
         r = chrissy.get("/errors", headers=self._auth(supplier_token))
-        assert r.status_code == 200
+        assert_status(r, 200, msg="GET /errors supplier")
 
     def test_patches_page_accessible(self, chrissy, supplier_token):
         """GET /patches with supplier token → 200 HTML."""
         r = chrissy.get("/patches", headers=self._auth(supplier_token))
-        assert r.status_code == 200
+        assert_status(r, 200, msg="GET /patches supplier")
 
     # ── Browser layer ────────────────────────────────────────────────────────
 

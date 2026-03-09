@@ -21,13 +21,14 @@ from pathlib import Path
 import pytest
 from playwright.sync_api import Page
 
-from .conftest import browser_login, hitl
+from .conftest import assert_status, browser_login, hitl
 
 pytestmark = [
     pytest.mark.live_portals,
     pytest.mark.live_db,
     pytest.mark.live_s3,
     pytest.mark.p0,
+    pytest.mark.serial,
 ]
 
 RETAILER = "lowes"
@@ -121,7 +122,7 @@ class TestE2E02:
     def test_errors_page_shows_fail(self, chrissy, supplier_token, fail_row):
         """Chrissy /errors shows the FAIL row."""
         r = chrissy.get("/errors", headers={"Authorization": f"Bearer {supplier_token}"})
-        assert r.status_code == 200
+        assert_status(r, 200, msg="GET /errors chrissy after seeded FAIL")
         assert "E001" in r.text or "FAIL" in r.text
 
     # ── Step 2: Patch applied ─────────────────────────────────────────────────
@@ -132,7 +133,7 @@ class TestE2E02:
             f"/patches/{recovery_patch}/mark-applied",
             headers={"Authorization": f"Bearer {supplier_token}"},
         )
-        assert r.status_code == 200
+        assert_status(r, 200, msg="POST /patches/{id}/mark-applied recovery patch")
         assert r.json()["status"] == "applied"
 
         # DB: applied=TRUE

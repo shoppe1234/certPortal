@@ -18,9 +18,9 @@ from __future__ import annotations
 import pytest
 from playwright.sync_api import Page, expect
 
-from .conftest import browser_login, hitl
+from .conftest import assert_status, browser_login, hitl
 
-pytestmark = [pytest.mark.live_portals, pytest.mark.live_db, pytest.mark.p0]
+pytestmark = [pytest.mark.live_portals, pytest.mark.live_db, pytest.mark.p0, pytest.mark.serial]
 
 PAM_URL = "http://localhost:8000"
 SUPPLIER = "acme"
@@ -32,18 +32,22 @@ class TestPAM03:
     @pytest.fixture(autouse=True)
     def reset_gates(self, db):
         """Reset acme gates to PENDING before each test that uses gates."""
-        cur = db.cursor()
-        cur.execute(
-            """
-            INSERT INTO hitl_gate_status (supplier_id, gate_1, gate_2, gate_3, last_updated_by)
-            VALUES (%s,'PENDING','PENDING','PENDING','test_reset')
-            ON CONFLICT (supplier_id) DO UPDATE
-                SET gate_1='PENDING', gate_2='PENDING', gate_3='PENDING',
-                    last_updated=NOW(), last_updated_by='test_reset'
-            """,
-            (SUPPLIER,),
-        )
-        db.commit()
+        try:
+            cur = db.cursor()
+            cur.execute(
+                """
+                INSERT INTO hitl_gate_status (supplier_id, gate_1, gate_2, gate_3, last_updated_by)
+                VALUES (%s,'PENDING','PENDING','PENDING','test_reset')
+                ON CONFLICT (supplier_id) DO UPDATE
+                    SET gate_1='PENDING', gate_2='PENDING', gate_3='PENDING',
+                        last_updated=NOW(), last_updated_by='test_reset'
+                """,
+                (SUPPLIER,),
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
 
     def _gate_url(self, gate: int) -> str:
         return f"/suppliers/{SUPPLIER}/gate/{gate}/complete"
@@ -56,17 +60,17 @@ class TestPAM03:
     def test_skip_gate_1_to_2_violation(self, pam, admin_token):
         """Attempt gate 2 before gate 1 → 409 GateOrderViolation."""
         r = pam.post(self._gate_url(2), headers=self._auth(admin_token))
-        assert r.status_code == 409
+        assert_status(r, 409, msg="POST /suppliers/{id}/gate/2/complete skip gate 1 violation")
 
     def test_skip_gate_1_to_3_violation(self, pam, admin_token):
         """Attempt gate 3 before gate 1 → 409 GateOrderViolation."""
         r = pam.post(self._gate_url(3), headers=self._auth(admin_token))
-        assert r.status_code == 409
+        assert_status(r, 409, msg="POST /suppliers/{id}/gate/3/complete skip gate 1 violation")
 
     def test_invalid_gate_number(self, pam, admin_token):
         """Gate number 4 → 400 Bad Request."""
         r = pam.post(f"/suppliers/{SUPPLIER}/gate/4/complete", headers=self._auth(admin_token))
-        assert r.status_code == 400
+        assert_status(r, 400, msg="POST /suppliers/{id}/gate/4/complete invalid gate number")
         assert "gate must be 1, 2, or 3" in r.json()["detail"]
 
     def test_invalid_gate_zero(self, pam, admin_token):
@@ -79,7 +83,7 @@ class TestPAM03:
     def test_complete_gate_1(self, pam, admin_token, db):
         """Complete gate 1 → 200, DB updated."""
         r = pam.post(self._gate_url(1), headers=self._auth(admin_token))
-        assert r.status_code == 200
+        assert_status(r, 200, msg="POST /suppliers/{id}/gate/1/complete success")
         body = r.json()
         assert body["status"] == "ok"
         assert body["gate"] == 1
@@ -111,7 +115,7 @@ class TestPAM03:
         """After gate 1 complete, skip to gate 3 → 409."""
         pam.post(self._gate_url(1), headers=self._auth(admin_token))
         r = pam.post(self._gate_url(3), headers=self._auth(admin_token))
-        assert r.status_code == 409
+        assert_status(r, 409, msg="POST /suppliers/{id}/gate/3/complete skip gate 2 violation")
 
     def test_certify_after_3_complete(self, pam, admin_token, db):
         """After all 3 gates complete, certify → 200, gate_3='CERTIFIED'."""
@@ -119,7 +123,7 @@ class TestPAM03:
             pam.post(self._gate_url(gate), headers=self._auth(admin_token))
 
         r = pam.post(f"/suppliers/{SUPPLIER}/gate/3/certify", headers=self._auth(admin_token))
-        assert r.status_code == 200
+        assert_status(r, 200, msg="POST /suppliers/{id}/gate/3/certify success")
         body = r.json()
         assert body["status"] == "certified"
         assert body["supplier_id"] == SUPPLIER

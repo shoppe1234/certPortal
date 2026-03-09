@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from .conftest import hitl
+from .conftest import assert_status, hitl
 
 pytestmark = [
     pytest.mark.live_portals,
@@ -106,7 +106,7 @@ class TestCHR05:
             pytest.skip("No 855 test_occurrence row — 855 test may have been skipped")
 
         r = chrissy.get("/scenarios", headers={"Authorization": f"Bearer {supplier_token}"})
-        assert r.status_code == 200
+        assert_status(r, 200, msg="GET /scenarios after 855 Moses run")
         assert "855" in r.text
 
     # ── 856 Ship Notice / Manifest ─────────────────────────────────────────────
@@ -152,7 +152,7 @@ class TestCHR05:
     def test_all_three_tx_in_scenarios(self, chrissy, supplier_token, db):
         """After all 3 Moses runs, Chrissy /scenarios shows 855, 856, 810 rows."""
         r = chrissy.get("/scenarios", headers={"Authorization": f"Bearer {supplier_token}"})
-        assert r.status_code == 200
+        assert_status(r, 200, msg="GET /scenarios after 855+856+810 Moses runs")
         # At least one of the transaction types should appear
         assert any(tx in r.text for tx in ("855", "856", "810")), (
             "None of 855/856/810 found in /scenarios — run CHR-05 Moses tests first"

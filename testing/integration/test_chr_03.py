@@ -22,13 +22,14 @@ from pathlib import Path
 import pytest
 from playwright.sync_api import Page
 
-from .conftest import browser_login, hitl
+from .conftest import assert_status, browser_login, hitl
 
 pytestmark = [
     pytest.mark.live_portals,
     pytest.mark.live_db,
     pytest.mark.live_s3,
     pytest.mark.p0,
+    pytest.mark.serial,
 ]
 
 EDI_FAIL_KEY = "lowes/acme/850/test_850_fail.edi"
@@ -146,14 +147,14 @@ class TestCHR03:
     def test_errors_page_shows_fail_data(self, chrissy, supplier_token, seeded_fail_row):
         """GET /errors returns 200 with error content."""
         r = chrissy.get("/errors", headers={"Authorization": f"Bearer {supplier_token}"})
-        assert r.status_code == 200
+        assert_status(r, 200, msg="GET /errors after seeded FAIL row")
         # Error codes should appear in the rendered HTML
         assert "E001" in r.text or "BEG" in r.text
 
     def test_patches_page_shows_suggestions(self, chrissy, supplier_token, seeded_patches):
         """GET /patches returns 200 with patch rows."""
         r = chrissy.get("/patches", headers={"Authorization": f"Bearer {supplier_token}"})
-        assert r.status_code == 200
+        assert_status(r, 200, msg="GET /patches after seeded patch suggestions")
         assert "E001" in r.text or "patch" in r.text.lower()
 
     def test_fail_row_in_db(self, db, seeded_fail_row):

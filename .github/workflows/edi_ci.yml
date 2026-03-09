@@ -150,27 +150,126 @@ jobs:
           print('Migration 002 applied')
           "
 
-      - name: Run all integration suites (A–F)
+      - name: Run migrated unit tests (Suites A–I → pytest)
         run: |
-          python -c "
-          import os, sys
-          os.environ.setdefault('LIFECYCLE_PROFILE', 'development')
+          python -m pytest testing/unit/ -v \
+            --junitxml=test-results/unit-suites.xml \
+            --html=test-results/unit-suites.html --self-contained-html
 
-          suites = ['a', 'b', 'c', 'd', 'e', 'f']
-          total_pass = total_fail = total_skip = 0
+      - name: Upload unit suite results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: unit-suite-results
+          path: test-results/
 
-          for letter in suites:
-              mod = __import__(f'testing.suites.suite_{letter}', fromlist=['run'])
-              results = mod.run()
-              p = sum(1 for r in results if r['status'].value == 'PASS')
-              f = sum(1 for r in results if r['status'].value == 'FAIL')
-              s = sum(1 for r in results if r['status'].value == 'SKIP')
-              total_pass += p
-              total_fail += f
-              total_skip += s
-              print(f'Suite {letter.upper()}: {p} PASS  {f} FAIL  {s} SKIP')
+  # ──────────────────────────────────────────────────────────────────────────
+  # Job 4: Integration scenario tests (16 scenarios, 138 tests)
+  #
+  # Requires: Postgres + MinIO + all 3 portals running.
+  # Runs P0 scenarios in CI mode (HITL gates auto-skipped).
+  # ──────────────────────────────────────────────────────────────────────────
+  integration-scenarios:
+    name: "Integration Scenarios (P0 — 138 tests)"
+    runs-on: ubuntu-latest
 
-          print(f'')
-          print(f'TOTAL: {total_pass} PASS  {total_fail} FAIL  {total_skip} SKIP')
-          sys.exit(1 if total_fail > 0 else 0)
-          "
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: certportal
+          POSTGRES_PASSWORD: certportal
+          POSTGRES_DB: certportal
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+      minio:
+        image: quay.io/minio/minio:latest
+        ports:
+          - 9000:9000
+        env:
+          MINIO_ROOT_USER: minioadmin
+          MINIO_ROOT_PASSWORD: minioadmin
+        options: >-
+          --health-cmd "mc ready local || exit 1"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      CERTPORTAL_DB_URL: postgresql://certportal:certportal@localhost:5432/certportal
+      CERTPORTAL_JWT_SECRET: ci-test-jwt-secret-not-for-production
+      CERTPORTAL_CI: "true"
+      LIFECYCLE_PROFILE: development
+
+      # MinIO as local S3
+      OVH_S3_ENDPOINT: http://localhost:9000
+      OVH_S3_KEY: minioadmin
+      OVH_S3_SECRET: minioadmin
+      OVH_S3_REGION: us-east-1
+
+      # Fake OpenAI — no live LLM calls in CI
+      OPENAI_API_KEY: sk-fake-openai-key-ci
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Install pyedi_core (editable)
+        run: pip install -e pyedi_core/
+
+      - name: Install Playwright Chromium
+        run: playwright install chromium
+
+      - name: Apply all database migrations
+        run: |
+          for sql in \
+            lifecycle_engine/migrations/001_lifecycle_tables.sql \
+            migrations/001_app_tables.sql \
+            migrations/002_users_table.sql \
+            migrations/003_patch_reject.sql \
+            migrations/004_revoked_tokens.sql \
+            migrations/005_password_reset.sql; do
+            psql $CERTPORTAL_DB_URL -f "$sql"
+          done
+
+      - name: Create S3 buckets and upload EDI fixtures
+        run: python testing/integration/setup_minio.py
+
+      - name: Start portals
+        run: |
+          uvicorn portals.pam:app --port 8000 &
+          uvicorn portals.meredith:app --port 8001 &
+          uvicorn portals.chrissy:app --port 8002 &
+          sleep 5
+          # Verify all 3 portals are alive
+          curl -sf http://localhost:8000/health
+          curl -sf http://localhost:8001/health
+          curl -sf http://localhost:8002/health
+
+      - name: Run P0 integration scenarios (CI mode)
+        run: |
+          python -m pytest testing/integration/ -v \
+            -m "p0 and not hitl" \
+            --junitxml=test-results/integration.xml \
+            --html=test-results/integration.html --self-contained-html
+
+      - name: Upload integration results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: integration-results
+          path: test-results/

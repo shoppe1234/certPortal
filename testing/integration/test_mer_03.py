@@ -21,9 +21,9 @@ import json
 
 import pytest
 
-from .conftest import hitl
+from .conftest import assert_status, hitl
 
-pytestmark = [pytest.mark.live_portals, pytest.mark.live_db, pytest.mark.live_s3, pytest.mark.p1]
+pytestmark = [pytest.mark.live_portals, pytest.mark.live_db, pytest.mark.live_s3, pytest.mark.p1, pytest.mark.serial]
 
 MER_URL = "http://localhost:8001"
 
@@ -49,7 +49,7 @@ class TestMER03:
     def test_yaml_wizard_page(self, mer, retailer_token):
         """GET /yaml-wizard → 200 with both bundle types."""
         r = mer.get("/yaml-wizard", headers=self._auth(retailer_token))
-        assert r.status_code == 200
+        assert_status(r, 200, msg="GET /yaml-wizard page with bundles")
         assert "general_merchandise" in r.text
         assert "transportation" in r.text
         assert "850" in r.text
@@ -63,7 +63,7 @@ class TestMER03:
             json={"retailer_slug": "lowes", "pdf_s3_key": "lowes/system/test_spec_v2.pdf"},
             headers=self._auth(retailer_token),
         )
-        assert r.status_code == 200
+        assert_status(r, 200, msg="POST /yaml-wizard/path1 queued")
         body = r.json()
         assert body["status"] == "queued"
         assert body["path"] == 1
@@ -105,7 +105,7 @@ class TestMER03:
             json={"retailer_slug": "lowes", "yaml_content": yaml_content},
             headers=self._auth(retailer_token),
         )
-        assert r.status_code == 200
+        assert_status(r, 200, msg="POST /yaml-wizard/path2 queued")
         body = r.json()
         assert body["status"] == "queued"
         assert body["path"] == 2
@@ -135,7 +135,7 @@ class TestMER03:
             },
             headers=self._auth(retailer_token),
         )
-        assert r.status_code == 200
+        assert_status(r, 200, msg="POST /yaml-wizard/path3 queued")
         body = r.json()
         assert body["status"] == "queued"
         assert body["path"] == 3

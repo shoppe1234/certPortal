@@ -17,9 +17,9 @@ import json
 import pytest
 from playwright.sync_api import Page
 
-from .conftest import hitl
+from .conftest import assert_status, hitl
 
-pytestmark = [pytest.mark.live_portals, pytest.mark.live_db, pytest.mark.live_s3, pytest.mark.p1]
+pytestmark = [pytest.mark.live_portals, pytest.mark.live_db, pytest.mark.live_s3, pytest.mark.p1, pytest.mark.serial]
 
 MER_URL = "http://localhost:8001"
 PDF_S3_KEY = "lowes/system/test_spec_v2.pdf"
@@ -40,7 +40,7 @@ class TestMER02:
             json={},
             headers=self._auth(retailer_token),
         )
-        assert r.status_code == 400
+        assert_status(r, 400, msg="POST /spec-setup/upload empty body")
         assert "required" in r.json()["detail"].lower()
 
     def test_missing_pdf_key_returns_400(self, mer, retailer_token):
@@ -50,7 +50,7 @@ class TestMER02:
             json={"retailer_slug": "lowes"},
             headers=self._auth(retailer_token),
         )
-        assert r.status_code == 400
+        assert_status(r, 400, msg="POST /spec-setup/upload missing pdf_s3_key")
 
     def test_unauthenticated_blocked(self, mer):
         """No token → 302 or 401."""
@@ -69,7 +69,7 @@ class TestMER02:
             json={"pdf_s3_key": PDF_S3_KEY, "retailer_slug": "lowes"},
             headers=self._auth(retailer_token),
         )
-        assert r.status_code == 200
+        assert_status(r, 200, msg="POST /spec-setup/upload valid payload")
         body = r.json()
         assert body["status"] == "queued"
         assert body["retailer_slug"] == "lowes"
@@ -82,7 +82,7 @@ class TestMER02:
             json={"pdf_s3_key": PDF_S3_KEY},
             headers=self._auth(retailer_token),
         )
-        assert r.status_code == 200
+        assert_status(r, 200, msg="POST /spec-setup/upload retailer_slug fallback from JWT")
         assert r.json()["retailer_slug"] == "lowes"
 
     def test_dwight_signal_written_to_s3(self, mer, retailer_token, s3_client, workspace_bucket):
@@ -92,7 +92,7 @@ class TestMER02:
             json={"pdf_s3_key": PDF_S3_KEY, "retailer_slug": "lowes"},
             headers=self._auth(retailer_token),
         )
-        assert r.status_code == 200
+        assert_status(r, 200, msg="POST /spec-setup/upload dwight signal trigger")
 
         # List signals directory and find a dwight_trigger signal
         prefix = "lowes/system/signals/"

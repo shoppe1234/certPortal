@@ -26,9 +26,9 @@ import json
 import pytest
 from playwright.sync_api import Page
 
-from .conftest import browser_login, hitl
+from .conftest import assert_status, browser_login, hitl
 
-pytestmark = [pytest.mark.live_portals, pytest.mark.live_db, pytest.mark.live_s3, pytest.mark.p1]
+pytestmark = [pytest.mark.live_portals, pytest.mark.live_db, pytest.mark.live_s3, pytest.mark.p1, pytest.mark.serial]
 
 CHR_URL = "http://localhost:8002"
 
@@ -58,22 +58,28 @@ class TestCHR04:
 
     @pytest.fixture(autouse=True)
     def upload_patch_content(self, s3_client, workspace_bucket, patch_ids):
-        """Upload dummy patch .yaml content to S3 for /content endpoint."""
+        """Upload dummy patch .yaml content to S3 for /content endpoint.
+
+        Uploads are idempotent — safe to re-run if partially completed.
+        """
         apply_id, reject_id = patch_ids
-        for patch_id, s3_key in [
-            (apply_id, "lowes/acme/patches/patch_beg03_test.yaml"),
-            (reject_id, "lowes/acme/patches/patch_isa13_test.yaml"),
-        ]:
-            content = (
-                f"# Patch {patch_id}\n\n"
-                "## Problem\nPO number too long or ISA13 non-numeric.\n\n"
-                "## Fix\nUpdate the segment value to comply with Lowe's spec.\n"
-            )
-            s3_client.put_object(
-                Bucket=workspace_bucket,
-                Key=s3_key,
-                Body=content.encode("utf-8"),
-            )
+        try:
+            for patch_id, s3_key in [
+                (apply_id, "lowes/acme/patches/patch_beg03_test.yaml"),
+                (reject_id, "lowes/acme/patches/patch_isa13_test.yaml"),
+            ]:
+                content = (
+                    f"# Patch {patch_id}\n\n"
+                    "## Problem\nPO number too long or ISA13 non-numeric.\n\n"
+                    "## Fix\nUpdate the segment value to comply with Lowe's spec.\n"
+                )
+                s3_client.put_object(
+                    Bucket=workspace_bucket,
+                    Key=s3_key,
+                    Body=content.encode("utf-8"),
+                )
+        except Exception as exc:
+            pytest.skip(f"S3 patch upload failed: {exc}")
 
     def _auth(self, token: str) -> dict:
         return {"Authorization": f"Bearer {token}"}
@@ -87,7 +93,7 @@ class TestCHR04:
             f"/patches/{apply_id}/mark-applied",
             headers=self._auth(supplier_token),
         )
-        assert r.status_code == 200
+        assert_status(r, 200, msg="POST /patches/{id}/mark-applied success")
         body = r.json()
         assert body["status"] == "applied"
         assert body["patch_id"] == apply_id
@@ -120,7 +126,7 @@ class TestCHR04:
             "/patches/999999/mark-applied",
             headers=self._auth(supplier_token),
         )
-        assert r.status_code == 404
+        assert_status(r, 404, msg="POST /patches/999999/mark-applied not found")
 
     # ── reject ────────────────────────────────────────────────────────────────
 
@@ -131,7 +137,7 @@ class TestCHR04:
             f"/patches/{reject_id}/reject",
             headers=self._auth(supplier_token),
         )
-        assert r.status_code == 200
+        assert_status(r, 200, msg="POST /patches/{id}/reject success")
         body = r.json()
         assert body["status"] == "rejected"
         assert body["patch_id"] == reject_id
@@ -149,7 +155,7 @@ class TestCHR04:
             "/patches/999999/reject",
             headers=self._auth(supplier_token),
         )
-        assert r.status_code == 404
+        assert_status(r, 404, msg="POST /patches/999999/reject not found")
 
     # ── patch content ─────────────────────────────────────────────────────────
 
@@ -160,7 +166,7 @@ class TestCHR04:
             f"/patches/{apply_id}/content",
             headers=self._auth(supplier_token),
         )
-        assert r.status_code == 200
+        assert_status(r, 200, msg="GET /patches/{id}/content accessible")
         # Should contain the markdown content we uploaded
         assert "Patch" in r.text or "Problem" in r.text
 
@@ -170,7 +176,7 @@ class TestCHR04:
             "/patches/999999/content",
             headers=self._auth(supplier_token),
         )
-        assert r.status_code == 404
+        assert_status(r, 404, msg="GET /patches/999999/content not found")
 
     # ── HITL gate ─────────────────────────────────────────────────────────────
 
