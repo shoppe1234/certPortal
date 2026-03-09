@@ -15,3 +15,11 @@ include = ["certportal*"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["testing"]
+markers = [
+  "live_portals: requires all 3 portals running on localhost (8000/8001/8002)",
+  "live_db: requires CERTPORTAL_DB_URL pointing to a seeded Postgres instance",
+  "live_s3: requires S3/MinIO reachable with certportal-raw-edi bucket present",
+  "hitl: pauses for operator input — cannot run fully unattended",
+  "p0: priority 0 scenarios (core happy-path)",
+  "p1: priority 1 scenarios (edge cases / recovery flows)",
+]
