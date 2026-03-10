@@ -1,10 +1,10 @@
 # certPortal — Claude Code Instructions
 
-## BEFORE WRITING ANY CODE
-Read these files first — in this order:
-1. agents/moses.py          ← understand current EDI validation logic
-2. DECISIONS.md             ← all Sprint 1 architectural decisions
-3. TECHNICAL_REQUIREMENTS.md ← full TRD v2.0
+## Project State
+
+Sprints 1–6 are complete. All modules below are built, tested, and committed.
+See `DECISIONS.md` (ADR-001 through ADR-025) for the authoritative record of every
+architectural decision made during Sprints 1–6.
 
 ## Architecture Invariants — NEVER VIOLATE
 - INV-01: Agents never import each other. S3 is the only inter-agent channel.
@@ -15,51 +15,108 @@ Read these files first — in this order:
 - INV-06: S3 paths scoped to {retailer_slug}/{supplier_slug}/.
 - INV-07: Portals never import from agents/.
 
-## New Constraints (Sprint 1)
+## Constraints
 - NC-01: edi_framework/ is READ-ONLY at runtime. Never write to it.
 - NC-02: No hardcoded transaction logic in .py files. YAML is the brain.
 - NC-03: PO number is the primary key in every table, log, and S3 path.
 - NC-04: pyedi_core/ must work standalone without lifecycle_engine/ installed.
 - NC-05: strict_mode=false dev, strict_mode=true production.
 
-## Build Order — Follow Exactly (TRD Section 10)
-Step 1:  Read moses.py + DECISIONS.md (Plan Mode)
-Step 2:  Create edi_framework/transactions/865_po_change_ack.yaml
-Step 3:  Create edi_framework/meta/ pykwalify schemas (3 files)
-Step 4:  Build schema_validators/ + validate_all.py
-Step 5:  Build lifecycle_engine/exceptions.py
-Step 6:  Build lifecycle_engine/loader.py
-Step 7:  Run Postgres migration (migrations/001_lifecycle_tables.sql)
-Step 8:  Build lifecycle_engine/state_store.py (psycopg2, no ORM)
-Step 9:  Build lifecycle_engine/validators.py
-Step 10: Build lifecycle_engine/s3_writer.py
-Step 11: Build lifecycle_engine/engine.py
-Step 12: Build lifecycle_engine/interface.py
-Step 13: Hook interface.py into pyedi_core/pipeline.py (with ImportError guard)
-Step 14: Add partner_id field read to pipeline.py config
-Step 15: Full integration test
-
 ## Full Technical Specification
-Read TECHNICAL_REQUIREMENTS.md for complete specs on lifecycle_engine/,
-schema_validators/, Postgres schema, build order, and Moses integration.
+Read TECHNICAL_REQUIREMENTS.md for the original Sprint 1 design spec (TRD v2.0)
+covering lifecycle_engine/, schema_validators/, Postgres schema, and Moses integration.
+
+## Key Modules
+
+### lifecycle_engine/ (Sprint 1 — complete)
+Order-to-cash state machine. Tracks every PO through its lifecycle.
+- `engine.py` — LifecycleEngine: 8-step process_event() sequence
+- `state_store.py` — Postgres persistence (psycopg2, no ORM, explicit transactions)
+- `validators.py` — 5 pure business-rule validators (transition, qty chain, N1, terminal, PO continuity)
+- `loader.py` — Loads order_to_cash.yaml at startup, caches in memory
+- `interface.py` — Public API: on_document_processed() — the ONLY file pipeline.py imports
+- `s3_writer.py` — Writes violations to S3 for Monica (INV-02)
+- `exceptions.py` — LifecycleError hierarchy (8 exception classes)
+- `config.yaml` — Profile-based strict_mode toggle
+- `migrations/001_lifecycle_tables.sql` — po_lifecycle, lifecycle_events, lifecycle_violations
+
+### schema_validators/ (Sprint 1 — complete)
+Pykwalify-based YAML validation. Dual role:
+1. Dev/CI gate — validates all edi_framework/ YAMLs
+2. Andy Path 2 runtime gate — validates uploaded YAMLs before storage
+
+### edi_framework/ (Sprint 1 — complete, read-only at runtime)
+- `transactions/` — 6 transaction YAMLs (850, 855, 856, 860, 865, 810)
+- `mappings/` — 6 turnaround mapping files
+- `lifecycle/order_to_cash.yaml` — State machine definition (717 lines)
+- `meta/` — 3 pykwalify meta-schemas
+- `lowes_master.yaml` — Transaction registry
+
+### certportal/core/ (Sprints 1–6)
+- `auth.py` — JWT HS256 (access + refresh tokens), bcrypt, DB-backed auth with _DEV_USERS fallback, JWT revocation (jti), password reset tokens, revoked token cleanup
+- `workspace.py` — S3AgentWorkspace (OVH S3-compatible)
+- `gate_enforcer.py` — Gate ordering enforcement (INV-03)
+- `email_utils.py` — SMTP helper for password reset emails (INV-07 compliant)
+- `config.py` — Pydantic settings
+- `database.py` — asyncpg connection pool
+- `models.py` — Pydantic models (ValidationResult, ValidationError)
+- `monica_logger.py` — Async logging to Monica
+
+### Portals (Sprints 1–6)
+All three portals: FastAPI + Jinja2 + HTMX, JWT-protected with role scoping.
+- `portals/pam.py` — Admin portal (port 8000): HITL queue, /register (admin-only), dashboard
+- `portals/meredith.py` — Retailer portal (port 8001): spec setup, YAML wizard, workspace signals
+- `portals/chrissy.py` — Supplier portal (port 8002): patch apply/reject/content viewer
+
+Auth on all portals: /login, /token, /token/refresh, /logout, /change-password, /forgot-password, /reset-password
+
+### Agents
+- `agents/moses.py` — EDI validation (deterministic). Lifecycle hook via _extract_po_from_edi() regex (ADR-012)
+- `agents/monica.py` — Orchestrator. Escalation → HITL queue DB write (ADR-022, psycopg2 sync)
+- `agents/kelly.py` — Communications. Real dispatch: SMTP, Google Chat, Teams (ADR-020). Gemini Flash-Lite memory (ADR-024)
+- `agents/andy.py` — YAML mapper (3 ingestion paths)
+- `agents/dwight.py` — PDF spec analyst (GPT-4o)
+- `agents/ryan.py` — Patch generator (GPT-4o-mini)
 
 ## Database
 - CERTPORTAL_DB_URL = Postgres
-- Use psycopg2. No SQLAlchemy. No ORM.
+- **psycopg2** for lifecycle_engine/ and agents (synchronous context)
+- **asyncpg** for portals and certportal/core/auth.py (async FastAPI context)
+- No SQLAlchemy. No ORM.
 - All writes in explicit transactions with BEGIN/COMMIT/ROLLBACK.
 - lifecycle_events table: INSERT ONLY. Never UPDATE or DELETE.
+
+### Migrations (apply in order)
+1. `migrations/001_app_tables.sql` — gate_status, hitl_queue, test_occurrences, etc.
+2. `lifecycle_engine/migrations/001_lifecycle_tables.sql` — po_lifecycle, lifecycle_events, lifecycle_violations
+3. `migrations/002_users_table.sql` — portal_users (bcrypt, roles, scoping)
+4. `migrations/003_patch_reject.sql` — patch_suggestions.rejected column
+5. `migrations/004_revoked_tokens.sql` — revoked_tokens (JWT revocation)
+6. `migrations/005_password_reset.sql` — password_reset_tokens + portal_users.email column
 
 ## S3 Workspace
 - Use existing S3AgentWorkspace abstraction from certportal.core
 - Do NOT use raw boto3 directly
 - All paths scoped to {retailer_slug}/{supplier_slug}/
 
-## Testing Targets
-- pytest --cov >= 85% on all lifecycle_engine/ modules
-- validate_all.py --ci must exit 0 before Sprint 1 is done
+## Testing
+9 test suites (A–I) orchestrated by `testing/certportal_jules_test.py`:
+- Suite A: Portal auth (JWT, bcrypt, refresh, revocation, password reset)
+- Suite B: Agent unit tests (Andy, Ryan)
+- Suite C: Gate enforcer (INV-03)
+- Suite D: S3 workspace scope
+- Suite E: HITL flow
+- Suite F: End-to-end lifecycle engine (requires live Postgres)
+- Suite G: Moses lifecycle hook
+- Suite H: Sprint 4 integration (signals, patches, dispatch, escalation)
+- Suite I: Kelly Gemini memory consolidation
+
+Run: `python -m testing.certportal_jules_test`
 
 ## Key File Locations
-- edi_framework/lifecycle/order_to_cash.yaml  ← state machine definition
-- edi_framework/lowes_master.yaml             ← transaction registry
-- pyedi_core/config/config.yaml              ← parser runtime config
-- lifecycle_engine/config.yaml               ← engine config (create this)
+- edi_framework/lifecycle/order_to_cash.yaml  — state machine definition
+- edi_framework/lowes_master.yaml             — transaction registry
+- pyedi_core/config/config.yaml              — parser runtime config (partner_id: lowes)
+- lifecycle_engine/config.yaml               — engine config (strict_mode profiles)
+- certportal/core/auth.py                    — JWT + bcrypt + revocation + password reset
+- certportal/core/email_utils.py             — SMTP helper for reset emails

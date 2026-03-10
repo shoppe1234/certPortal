@@ -704,46 +704,48 @@ result = Pipeline(config_path='./pyedi_core/config/config.yaml').run(
 ## 12. Definition of Done
 
 ### `lifecycle_engine/` is done when:
-- [ ] `865_po_change_ack.yaml` exists and passes schema validation
-- [ ] Postgres migration runs clean on first execution
-- [ ] Happy path: 850 → 855 → 856 → 810 creates correct rows in all 3 tables
-- [ ] Change path: 860 → 865 (AT and RJ) works correctly
-- [ ] Reverse PO path: 855 with no prior 850 → `reverse_po_created` state
-- [ ] All 5 violation types raise correct exceptions + write to `lifecycle_violations` + S3
-- [ ] Quantity chain catches over-invoiced scenario
-- [ ] N1 qualifier mismatch caught and recorded
-- [ ] Process restart test: state survives engine restart (Postgres persists)
-- [ ] `pipeline.py` hook integrated with `ImportError` guard — `pyedi_core` works standalone
-- [ ] `strict_mode=false` logs violations without failing pipeline
-- [ ] `pytest --cov >= 85%` on all `lifecycle_engine/` modules
+- [x] `865_po_change_ack.yaml` exists and passes schema validation
+- [x] Postgres migration runs clean on first execution
+- [x] Happy path: 850 → 855 → 856 → 810 creates correct rows in all 3 tables
+- [x] Change path: 860 → 865 (AT and RJ) works correctly
+- [x] Reverse PO path: 855 with no prior 850 → `reverse_po_created` state
+- [x] All 5 violation types raise correct exceptions + write to `lifecycle_violations` + S3
+- [x] Quantity chain catches over-invoiced scenario
+- [x] N1 qualifier mismatch caught and recorded
+- [x] Process restart test: state survives engine restart (Postgres persists)
+- [x] `pipeline.py` hook integrated with `ImportError` guard — `pyedi_core` works standalone
+- [x] `strict_mode=false` logs violations without failing pipeline
+- [x] `pytest --cov >= 85%` on all `lifecycle_engine/` modules
 
 ### `schema_validators/` is done when:
-- [ ] 3 meta-schema YAML files exist in `edi_framework/meta/`
-- [ ] All 14 `edi_framework/` files pass validation (13 existing + 865)
-- [ ] `validate_all.py --ci` exits 0 on clean repo, exits 1 on any failure
-- [ ] `validate_file()` library function works when called by Andy agent (Path 2)
-- [ ] GitHub Actions workflow runs validators on every push to `main`
+- [x] 3 meta-schema YAML files exist in `edi_framework/meta/`
+- [x] All 14 `edi_framework/` files pass validation (13 existing + 865)
+- [x] `validate_all.py --ci` exits 0 on clean repo, exits 1 on any failure
+- [x] `validate_file()` library function works when called by Andy agent (Path 2)
+- [x] GitHub Actions workflow runs validators on every push to `main`
 
 ### Sprint 1 is done when:
-- [ ] All above checkboxes pass
-- [ ] Full integration test: real `.x12` file → `pyedi_core` pipeline → lifecycle engine → Postgres rows → S3 violation write
-- [ ] `DECISIONS.md` updated with Sprint 1 decisions
+- [x] All above checkboxes pass
+- [x] Full integration test: real `.x12` file → `pyedi_core` pipeline → lifecycle engine → Postgres rows → S3 violation write
+- [x] `DECISIONS.md` updated with Sprint 1 decisions
+
+> **Status:** Sprint 1 completed — commit `7751ddd` (2026-03-06). All items verified via Suite F integration tests.
 
 ---
 
 ## 13. Items to Verify in Claude Code Desktop
 
-> Complete these in Step 1 (Plan Mode) before writing any code.
+> These were completed during Sprint 1, Step 1 (Plan Mode). Recorded here for reference.
 
-| # | Item | Where to Look | What You Need |
-|---|---|---|---|
-| **V1** | Does Moses already call `pyedi_core`? What is its current validation logic? | `agents/moses.py` | Determines if Moses needs updating or just the hook added |
-| **V2** | Any Sprint 1 decisions in `DECISIONS.md` that contradict this TRD? | `DECISIONS.md` | Read all; update after Sprint 1 |
-| **V3** | What shared utilities exist in `certportal.core`? Postgres connection pool? | `certportal/` directory | `StateStore` should reuse existing Postgres patterns |
-| **V4** | Where does Andy store validated YAMLs after Path 2? | `agents/andy.py` | `validate_file()` must integrate with Andy's storage call |
-| **V5** | What are the `S3AgentWorkspace` method signatures for S3 writes? | `certportal/core/` | `s3_writer.py` must use existing abstraction — not raw boto3 |
-| **V6** | What does `gate_enforcer.py` look like? | `certportal/` or `agents/` | Lifecycle state machine should align with existing gate pattern (INV-03) |
-| **V7** | Is `psycopg2` already in `requirements.txt`? Is `pykwalify`? | `requirements.txt` | Avoid duplicate dependency entries |
+| # | Item | Resolution |
+|---|---|---|
+| **V1** | Does Moses already call `pyedi_core`? | Moses calls `pyedi_core.validate()` (stubbed). Lifecycle hook added directly in moses.py via `_extract_po_from_edi()` regex (ADR-012). |
+| **V2** | Any decisions that contradict this TRD? | No contradictions. ADR-011 made `prior_state` nullable. All other ADRs extend the TRD. |
+| **V3** | Shared utilities in `certportal.core`? | `workspace.py` (S3AgentWorkspace), `database.py` (asyncpg pool), `config.py` (Pydantic settings), `gate_enforcer.py`. StateStore uses its own psycopg2 connections (sync context). |
+| **V4** | Where does Andy store validated YAMLs? | Andy Path 2 calls `validate_file()` from schema_validators, then uploads to S3 workspace. |
+| **V5** | `S3AgentWorkspace` method signatures? | `upload(key, content)`, `download(key)`, `download_retailer_map(key)` (ADR-010), `append_log(key, line)`. |
+| **V6** | `gate_enforcer.py` pattern? | `assert_gate_precondition(conn, supplier_id, gate)` — validates gate N-1 is COMPLETE before gate N can activate. |
+| **V7** | psycopg2 / pykwalify in requirements.txt? | Both added: `psycopg2-binary>=2.9`, `pykwalify>=1.8`. |
 
 ---
 

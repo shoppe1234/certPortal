@@ -1,6 +1,6 @@
-# certPortal — Architectural Decision Record (Sprint 1–4)
+# certPortal — Architectural Decision Record (Sprint 1–6)
 
-Decisions made during Sprints 1–4 that were not explicitly covered by the build prompt.
+Decisions made during Sprints 1–6 that were not explicitly covered by the build prompt.
 All choices favour the most conservative, explicit, auditable option.
 
 ---
@@ -238,16 +238,16 @@ bcrypt verification when the DB is unreachable.
 
 ---
 
-## Out-of-scope items (not built per Section 10)
+## Out-of-scope items (not yet built)
 
 - React frontend
-- Google ADK / Gemini Flash-Lite (Sprint 2 stubs added to kelly.py)
+- Google ADK orchestration framework (Kelly uses `google-generativeai` SDK directly per ADR-024)
 - AS2 / SFTP ingest
 - Stripe billing
 - White-label subdomain routing
 - PagerDuty (`if settings.pagerduty_key` guard pattern noted but not implemented)
-- Full PyEDI-Core integration (stubbed)
-- Production PostgreSQL schema migrations (schema SQL in database.py as comments only)
+- Full PyEDI-Core integration (Moses uses `pyedi_core.validate()` stub per ADR-006)
+- Production PostgreSQL schema migrations tooling (raw SQL files used directly)
 
 ## ADR-016: Sprint 3 /register and /change-password Endpoints
 
