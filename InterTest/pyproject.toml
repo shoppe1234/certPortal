@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.backends.legacy:BuildBackend"
+
+[project]
+name = "certportal"
+version = "1.0.0"
+requires-python = ">=3.11"
+description = "certPortal — cloud-native multi-tenant EDI certification platform"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["certportal*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["testing"]
+markers = [
+  "unit: pure unit tests — no live services required (mocked DB/S3/OpenAI)",
+  "live_portals: requires all 3 portals running on localhost (8000/8001/8002)",
+  "live_db: requires CERTPORTAL_DB_URL pointing to a seeded Postgres instance",
+  "live_s3: requires S3/MinIO reachable with certportal-raw-edi bucket present",
+  "hitl: pauses for operator input — cannot run fully unattended",
+  "p0: priority 0 scenarios (core happy-path)",
+  "p1: priority 1 scenarios (edge cases / recovery flows)",
+  "serial: must run sequentially — mutates shared DB state (unsafe for xdist)",
+]
