@@ -40,11 +40,16 @@ class ChrissyFlow(BaseFlow):
         )
         if not ok:
             return
+        await self.capture("login")
 
         await r.run_step(f"{pfx}scenarios",     self._scenarios,     page=p, relogin_fn=self.relogin)
+        await self.capture("scenarios")
         await r.run_step(f"{pfx}errors",        self._errors,        page=p, relogin_fn=self.relogin)
+        await self.capture("errors")
         await r.run_step(f"{pfx}patches",       self._patches,       page=p, relogin_fn=self.relogin)
+        await self.capture("patches")
         await r.run_step(f"{pfx}certification", self._certification, page=p, relogin_fn=self.relogin)
+        await self.capture("certification")
         await r.run_step(f"{pfx}logout",        self.logout,         max_retries=2, page=p)
 
     # ------------------------------------------------------------------

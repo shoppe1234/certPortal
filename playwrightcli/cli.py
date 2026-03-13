@@ -3,6 +3,7 @@
 Usage:
   python -m playwrightcli --portal all            # run all portals, headed (default)
   python -m playwrightcli --portal pam --headless # PAM only, no browser window
+  python -m playwrightcli --portal all --observe  # run + real-time design observer
   python -m playwrightcli --consolidate           # update memory.md from feedback.md
   python -m playwrightcli --portal all --dry-run  # show planned steps, read memory
 """
@@ -48,7 +49,12 @@ def _preflight(portal_names: list[str]) -> bool:
 # Per-portal async runner
 # ------------------------------------------------------------------
 
-async def _run_portal(name: str, headless: bool, runner: StepRunner) -> None:
+async def _run_portal(
+    name: str,
+    headless: bool,
+    runner: StepRunner,
+    observer_queue: asyncio.Queue | None = None,
+) -> None:
     from playwright.async_api import async_playwright
 
     flow_map = {
@@ -66,11 +72,47 @@ async def _run_portal(name: str, headless: bool, runner: StepRunner) -> None:
         ctx = await browser.new_context()
         page = await ctx.new_page()
         try:
-            flow = FlowClass(page=page, config=PORTALS[name], runner=runner)
+            flow = FlowClass(
+                page=page,
+                config=PORTALS[name],
+                runner=runner,
+                observer_queue=observer_queue,
+            )
             await flow.run()
         finally:
             await ctx.close()
             await browser.close()
+
+
+# ------------------------------------------------------------------
+# Observed run — Playwright + observer consumer as concurrent tasks
+# ------------------------------------------------------------------
+
+async def _run_observed(portal_names: list[str], headless: bool, runner: StepRunner) -> None:
+    """Run portal flows with a concurrent design observer consuming screenshots."""
+    from playwrightcli.observer import DesignObserver
+
+    queue: asyncio.Queue = asyncio.Queue()
+    observer = DesignObserver(queue)
+
+    # Start the observer consumer as a background task
+    consumer_task = asyncio.create_task(observer.run())
+
+    # Run each portal sequentially (they share a StepRunner),
+    # but the observer processes screenshots concurrently
+    for name in portal_names:
+        print(f"=== {name.upper()} ===")
+        await _run_portal(name, headless, runner, observer_queue=queue)
+        print()
+
+    # Signal observer to stop and wait for it to finish processing
+    await queue.put(None)
+    await consumer_task
+
+    # Write analysis reports
+    observer.write_reports()
+
+    print(f"Screenshots: {observer.frame_count} frames captured")
 
 
 # ------------------------------------------------------------------
@@ -130,10 +172,16 @@ def main() -> None:
         help="Run browser headless — suppress the browser window (default: headed)",
     )
     parser.add_argument(
+        "--observe",
+        action="store_true",
+        default=False,
+        help="Enable real-time design observer: capture screenshots, analyze via Claude Vision",
+    )
+    parser.add_argument(
         "--consolidate",
         action="store_true",
         default=False,
-        help="Consolidate feedback.md → memory.md and exit (no browser)",
+        help="Consolidate feedback.md -> memory.md and exit (no browser)",
     )
     parser.add_argument(
         "--dry-run",
@@ -147,7 +195,7 @@ def main() -> None:
 
     # ---- consolidate-only mode ----
     if args.consolidate:
-        print("Consolidating feedback.md → memory.md ...")
+        print("Consolidating feedback.md -> memory.md ...")
         mm.consolidate()
         print("Done. memory.md updated.")
         return
@@ -169,6 +217,7 @@ def main() -> None:
     print(f"Run started : {datetime.now().isoformat(timespec='seconds')}")
     print(f"Portals     : {', '.join(portal_names)}")
     print(f"Mode        : {'headless' if args.headless else 'headed (browser visible)'}")
+    print(f"Observer    : {'ACTIVE — screenshots + Claude Vision analysis' if args.observe else 'off'}")
     print()
 
     print("Pre-flight check:")
@@ -184,10 +233,15 @@ def main() -> None:
 
     runner = StepRunner(memory_manager=mm)
 
-    for name in portal_names:
-        print(f"=== {name.upper()} ===")
-        asyncio.run(_run_portal(name, args.headless, runner))
-        print()
+    if args.observe:
+        # Run with concurrent observer (single event loop)
+        asyncio.run(_run_observed(portal_names, args.headless, runner))
+    else:
+        # Original behavior — no observer
+        for name in portal_names:
+            print(f"=== {name.upper()} ===")
+            asyncio.run(_run_portal(name, args.headless, runner))
+            print()
 
     # Flush failures to feedback.md
     runner.write_feedback(mm)

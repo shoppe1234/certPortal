@@ -1,17 +1,24 @@
 """base_flow.py — Shared Playwright helpers for all three portal flows.
 
 Provides: login(), logout(), goto(), wait_htmx(), detect_page_error(),
-          assert_page_ok(), relogin() (used as runner correction callback).
+          assert_page_ok(), relogin() (used as runner correction callback),
+          capture() (pushes screenshot to observer queue).
 """
 from __future__ import annotations
 
+import asyncio
+from typing import TYPE_CHECKING
+
 from playwrightcli.config import TIMEOUTS
+
+if TYPE_CHECKING:
+    from playwrightcli.observer import ObserverFrame
 
 
 class BaseFlow:
     """Base class for PamFlow, MeredithFlow, ChrissyFlow."""
 
-    def __init__(self, page, config: dict, runner) -> None:
+    def __init__(self, page, config: dict, runner, *, observer_queue: asyncio.Queue | None = None) -> None:
         self.page = page
         self.config = config
         self.runner = runner
@@ -19,6 +26,8 @@ class BaseFlow:
         self.username: str = config["username"]
         self.password: str = config["password"]
         self._logged_in: bool = False
+        self._observer_queue = observer_queue
+        self._portal: str = config.get("role", "unknown")
 
     # ------------------------------------------------------------------
     # Auth
@@ -70,6 +79,35 @@ class BaseFlow:
         """Re-authenticate — used as a StepRunner correction callback for session expiry."""
         self._logged_in = False
         await self.login()
+
+    # ------------------------------------------------------------------
+    # Observer — real-time screenshot capture
+    # ------------------------------------------------------------------
+
+    async def capture(self, step: str) -> None:
+        """Take a full-page screenshot and push to the observer queue.
+
+        No-op if observer mode is not active (queue is None).
+        Called by each flow after navigating + waiting for HTMX to settle.
+        """
+        if self._observer_queue is None:
+            return
+
+        from playwrightcli.observer import ObserverFrame
+
+        png_bytes = await self.page.screenshot(full_page=True)
+
+        # Map role -> portal name for consistent naming
+        portal_name_map = {"admin": "pam", "retailer": "meredith", "supplier": "chrissy"}
+        portal = portal_name_map.get(self._portal, self._portal)
+
+        frame = ObserverFrame(
+            portal=portal,
+            step=step,
+            png_bytes=png_bytes,
+            url=self.page.url,
+        )
+        await self._observer_queue.put(frame)
 
     # ------------------------------------------------------------------
     # Navigation helpers

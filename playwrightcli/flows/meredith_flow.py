@@ -36,9 +36,12 @@ class MeredithFlow(BaseFlow):
         )
         if not ok:
             return
+        await self.capture("login")
 
         await r.run_step(f"{pfx}spec-setup",      self._spec_setup,      page=p, relogin_fn=self.relogin)
+        await self.capture("spec-setup")
         await r.run_step(f"{pfx}supplier-status",  self._supplier_status, page=p, relogin_fn=self.relogin)
+        await self.capture("supplier-status")
         await r.run_step(f"{pfx}logout",           self.logout,           max_retries=2, page=p)
 
     # ------------------------------------------------------------------

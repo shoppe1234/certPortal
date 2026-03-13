@@ -41,11 +41,16 @@ class PamFlow(BaseFlow):
         )
         if not ok:
             return
+        await self.capture("login")
 
         await r.run_step(f"{pfx}retailers",    self._retailers,     page=p, relogin_fn=self.relogin)
+        await self.capture("retailers")
         await r.run_step(f"{pfx}suppliers",    self._suppliers,     page=p, relogin_fn=self.relogin)
+        await self.capture("suppliers")
         await r.run_step(f"{pfx}hitl-queue",   self._hitl_queue,    page=p, relogin_fn=self.relogin)
+        await self.capture("hitl-queue")
         await r.run_step(f"{pfx}monica-memory", self._monica_memory, page=p, relogin_fn=self.relogin)
+        await self.capture("monica-memory")
         await r.run_step(f"{pfx}logout",       self.logout,         max_retries=2, page=p)
 
     # ------------------------------------------------------------------
