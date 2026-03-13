@@ -7,6 +7,8 @@ Usage:
   python -m playwrightcli --portal all --verify   # run + business requirements verification
   python -m playwrightcli --consolidate           # update memory.md from feedback.md
   python -m playwrightcli --portal all --dry-run  # show planned steps, read memory
+  python -m playwrightcli --portal meredith --human          # human-in-the-loop: you click, harness verifies
+  python -m playwrightcli --portal meredith --human --verify # human mode + requirements verification
 """
 from __future__ import annotations
 
@@ -58,6 +60,7 @@ async def _run_portal(
     runner: StepRunner,
     observer_queue: asyncio.Queue | None = None,
     verifier=None,
+    human_mode: bool = False,
 ) -> None:
     from playwright.async_api import async_playwright
 
@@ -88,6 +91,7 @@ async def _run_portal(
                     runner=runner,
                     observer_queue=observer_queue,
                     verifier=verifier,
+                    human_mode=human_mode,
                 )
             await flow.run()
         finally:
@@ -104,6 +108,7 @@ async def _run_observed(
     headless: bool,
     runner: StepRunner,
     verifiers: dict | None = None,
+    human_mode: bool = False,
 ) -> None:
     """Run portal flows with a concurrent design observer consuming screenshots."""
     from playwrightcli.observer import DesignObserver
@@ -119,7 +124,7 @@ async def _run_observed(
     for name in portal_names:
         print(f"=== {name.upper()} ===")
         verifier = verifiers.get(name) if verifiers else None
-        await _run_portal(name, headless, runner, observer_queue=queue, verifier=verifier)
+        await _run_portal(name, headless, runner, observer_queue=queue, verifier=verifier, human_mode=human_mode)
         print()
 
     # Signal observer to stop and wait for it to finish processing
@@ -273,6 +278,19 @@ def main() -> None:
         default=False,
         help="Show planned steps and read memory; do not open a browser",
     )
+    parser.add_argument(
+        "--human",
+        action="store_true",
+        default=False,
+        help=(
+            "Human-in-the-loop mode: login is automated, then the terminal prompts "
+            "you to perform each step manually in the browser. "
+            "The harness verifies DOM state after each action. "
+            "Always headed (ignores --headless). "
+            "Currently supported: meredith. "
+            "Combine with --verify to run requirement checks after each step."
+        ),
+    )
     args = parser.parse_args()
 
     mm = MemoryManager()
@@ -304,11 +322,19 @@ def main() -> None:
         _dry_run(portal_names, mm, verify=args.verify)
         return
 
+    # Human mode is always headed — override --headless if supplied together
+    if args.human and args.headless:
+        print("  NOTE  --human overrides --headless; browser will be visible")
+    headless = args.headless and not args.human
+
     # ---- normal run ----
     print("\n--- certPortal Playwright CLI ---")
     print(f"Run started : {datetime.now().isoformat(timespec='seconds')}")
     print(f"Portals     : {', '.join(portal_names)}")
-    print(f"Mode        : {'headless' if args.headless else 'headed (browser visible)'}")
+    if args.human:
+        print(f"Mode        : HUMAN-IN-THE-LOOP (you click, harness verifies)")
+    else:
+        print(f"Mode        : {'headless' if headless else 'headed (browser visible)'}")
     print(f"Observer    : {'ACTIVE — screenshots + Claude Vision analysis' if args.observe else 'off'}")
     print(f"Verifier    : {'ACTIVE — DOM-based requirements checks' if args.verify else 'off'}")
     print()
@@ -346,16 +372,26 @@ def main() -> None:
             for name in portal_names
         }
 
-    if args.observe:
-        # Run with concurrent observer (single event loop)
-        asyncio.run(_run_observed(portal_names, args.headless, runner, verifiers=verifiers))
-    else:
-        # Original behavior — no observer
-        for name in portal_names:
-            print(f"=== {name.upper()} ===")
-            verifier = verifiers.get(name) if verifiers else None
-            asyncio.run(_run_portal(name, args.headless, runner, verifier=verifier))
-            print()
+    # Start human control server before any portal run, stop it after (even on error)
+    if args.human:
+        from playwrightcli.human_control import start_server, stop_server, CONTROL_PORT
+        start_server()
+        print(f"  Control page : http://localhost:{CONTROL_PORT}  (open this in your browser)\n")
+
+    try:
+        if args.observe:
+            # Run with concurrent observer (single event loop)
+            asyncio.run(_run_observed(portal_names, headless, runner, verifiers=verifiers, human_mode=args.human))
+        else:
+            # Original behavior — no observer
+            for name in portal_names:
+                print(f"=== {name.upper()} ===")
+                verifier = verifiers.get(name) if verifiers else None
+                asyncio.run(_run_portal(name, headless, runner, verifier=verifier, human_mode=args.human))
+                print()
+    finally:
+        if args.human:
+            stop_server()
 
     # Flush failures to feedback.md
     runner.write_feedback(mm)

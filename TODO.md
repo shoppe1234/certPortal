@@ -142,6 +142,26 @@ Items that belong in the main codebase, not in the test harness.
 
 ---
 
+## Documentation & QA
+
+**Master Task List** (`instructions/master_task_list_discussion.md`)
+- A per-persona (Admin · Retailer · Supplier) task list covering every portal function,
+  login steps, limitations, and sequence numbers for Playwright storyboarding
+- Will serve as: internal QA checklist · user manual foundation · screenshot narration script
+- Status: **DEFERRED — 8 open questions must be answered first**
+- Discussion captured in: `instructions/master_task_list_discussion.md`
+- Key decisions needed before writing:
+  1. Audience sophistication (EDI-literate vs. plain-language)
+  2. Sequence numbering scheme (flat vs. hierarchical)
+  3. Error path depth (happy path only vs. full QA coverage)
+  4. Account bootstrap flow (admin pre-creates accounts vs. assumed pre-existing)
+  5. Limitation tagging (design constraints vs. TODO items separated or combined)
+  6. Playwright narration voice (first-person / third-person / imperative)
+  7. Screenshot checkpoint granularity (every step vs. milestones only)
+  8. Deferred feature treatment (`[FUTURE]` tags vs. excluded entirely)
+
+---
+
 ## Quick Reference — Current Harness State
 
 ```

@@ -2,7 +2,8 @@
 
 Provides: login(), logout(), goto(), wait_htmx(), detect_page_error(),
           assert_page_ok(), relogin() (used as runner correction callback),
-          capture() (pushes screenshot to observer queue).
+          capture() (pushes screenshot to observer queue),
+          await_human() (human-in-the-loop step prompt).
 """
 from __future__ import annotations
 
@@ -27,6 +28,7 @@ class BaseFlow:
         *,
         observer_queue: asyncio.Queue | None = None,
         verifier: RequirementsVerifier | None = None,
+        human_mode: bool = False,
     ) -> None:
         self.page = page
         self.config = config
@@ -38,6 +40,7 @@ class BaseFlow:
         self._observer_queue = observer_queue
         self._verifier = verifier
         self._portal: str = config.get("role", "unknown")
+        self.human_mode: bool = human_mode
 
     # ------------------------------------------------------------------
     # Auth
@@ -89,6 +92,30 @@ class BaseFlow:
         """Re-authenticate — used as a StepRunner correction callback for session expiry."""
         self._logged_in = False
         await self.login()
+
+    # ------------------------------------------------------------------
+    # Human-in-the-loop prompt
+    # ------------------------------------------------------------------
+
+    async def await_human(self, guidance: str, step_name: str = "") -> bool:
+        """Pause for human action via the localhost control page.
+
+        Calls human_control.get_server() (lazy import — only active in
+        --human mode), updates the displayed step, and waits for the user
+        to click "Done, advance" or "Skip" in their browser.
+
+        Returns True to advance, False to skip.
+        """
+        from playwrightcli.human_control import get_server
+        srv = get_server()
+        srv.set_step(
+            step_name=step_name,
+            guidance=guidance,
+            portal=self._portal,
+            portal_url=self.base_url,
+        )
+        print(f"  [human] {step_name} — act in browser, then click 'Done' at http://localhost:{srv.port}")
+        return await srv.wait_for_advance()
 
     # ------------------------------------------------------------------
     # Observer — real-time screenshot capture

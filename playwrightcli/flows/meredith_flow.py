@@ -8,6 +8,11 @@ Steps:
   meredith::yaml-wizard-path1-signal POST /yaml-wizard/path1 → verify S3 andy_path1_trigger signal
   meredith::yaml-wizard-path3-signal POST /yaml-wizard/path3 → verify S3 andy_path3_trigger signal
   meredith::logout                   POST /logout → assert /login
+
+Human mode (--human flag):
+  Login is automated (infrastructure). For every other step the terminal prints
+  guidance, waits for your Enter keypress, then runs the same assertions that
+  the automated flow would run — so PASS/FAIL reflects real browser state.
 """
 from __future__ import annotations
 
@@ -28,6 +33,37 @@ MEREDITH_STEPS = [
     "logout",
 ]
 
+# Human-readable guidance for each step shown in --human mode
+HUMAN_GUIDANCE: dict[str, str] = {
+    "spec-setup": (
+        "Navigate to /spec-setup (Spec Setup in the nav). "
+        "Wait for the page to load — you should see a spec table or an empty state."
+    ),
+    "supplier-status": (
+        "Navigate to /supplier-status (Supplier Status in the nav). "
+        "Wait for the supplier table or empty state to appear."
+    ),
+    "yaml-wizard-signal": (
+        "Navigate to /yaml-wizard and trigger Path 2 (upload an existing YAML / "
+        "select bundle). Complete the form and submit. "
+        "The harness will fire the API call automatically after you press Enter."
+    ),
+    "yaml-wizard-path1-signal": (
+        "Navigate to /yaml-wizard and trigger Path 1 (upload a PDF spec). "
+        "Complete the form and submit. "
+        "The harness will fire the API call automatically after you press Enter."
+    ),
+    "yaml-wizard-path3-signal": (
+        "Navigate to /yaml-wizard and trigger Path 3 (manual segment overrides). "
+        "Complete the form and submit. "
+        "The harness will fire the API call automatically after you press Enter."
+    ),
+    "logout": (
+        "Click the Logout button (or navigate to /logout) to end your session. "
+        "You should be redirected to /login."
+    ),
+}
+
 
 class MeredithFlow(BaseFlow):
     async def run(self) -> None:
@@ -35,6 +71,7 @@ class MeredithFlow(BaseFlow):
         p = self.page
         pfx = f"{PORTAL}::"
 
+        # Login is always automated — it is infrastructure, not a portal feature.
         ok = await r.run_step(
             f"{pfx}login",
             self.login,
@@ -50,32 +87,48 @@ class MeredithFlow(BaseFlow):
         await r.run_step(f"{pfx}spec-setup",      self._spec_setup,      page=p, relogin_fn=self.relogin)
         await self.capture("spec-setup")
         await self.verify("spec-setup")
-        await r.run_step(f"{pfx}supplier-status",    self._supplier_status,    page=p, relogin_fn=self.relogin)
+
+        await r.run_step(f"{pfx}supplier-status", self._supplier_status, page=p, relogin_fn=self.relogin)
         await self.capture("supplier-status")
         await self.verify("supplier-status")
-        await r.run_step(f"{pfx}yaml-wizard-signal",        self._yaml_wizard_signal,        page=p, relogin_fn=self.relogin)
-        await r.run_step(f"{pfx}yaml-wizard-path1-signal",  self._yaml_wizard_path1_signal,  page=p, relogin_fn=self.relogin)
-        await r.run_step(f"{pfx}yaml-wizard-path3-signal",  self._yaml_wizard_path3_signal,  page=p, relogin_fn=self.relogin)
-        await r.run_step(f"{pfx}logout",                    self.logout,                     max_retries=2, page=p)
+
+        await r.run_step(f"{pfx}yaml-wizard-signal",       self._yaml_wizard_signal,       page=p, relogin_fn=self.relogin)
+        await r.run_step(f"{pfx}yaml-wizard-path1-signal", self._yaml_wizard_path1_signal, page=p, relogin_fn=self.relogin)
+        await r.run_step(f"{pfx}yaml-wizard-path3-signal", self._yaml_wizard_path3_signal, page=p, relogin_fn=self.relogin)
+
+        await r.run_step(f"{pfx}logout", self._logout_step, max_retries=2, page=p)
 
     # ------------------------------------------------------------------
     # Step implementations
     # ------------------------------------------------------------------
 
     async def _spec_setup(self) -> None:
-        await self.goto("/spec-setup")
-        await self.assert_page_ok()
-        await self.wait_htmx()
-        # Spec table or empty-state (no specs uploaded yet is valid)
+        if self.human_mode:
+            ready = await self.await_human(HUMAN_GUIDANCE["spec-setup"], "meredith::spec-setup")
+            if not ready:
+                return
+        else:
+            await self.goto("/spec-setup")
+            await self.assert_page_ok()
+            await self.wait_htmx()
+
+        # Assertions — run in both modes
         await self.page.wait_for_selector(
             "table, .empty-state, main, h1, h2",
             timeout=10_000,
         )
 
     async def _supplier_status(self) -> None:
-        await self.goto("/supplier-status")
-        await self.assert_page_ok()
-        await self.wait_htmx()
+        if self.human_mode:
+            ready = await self.await_human(HUMAN_GUIDANCE["supplier-status"], "meredith::supplier-status")
+            if not ready:
+                return
+        else:
+            await self.goto("/supplier-status")
+            await self.assert_page_ok()
+            await self.wait_htmx()
+
+        # Assertions — run in both modes
         await self.page.wait_for_selector(
             "table, .empty-state, main, h1, h2",
             timeout=10_000,
@@ -91,8 +144,15 @@ class MeredithFlow(BaseFlow):
         if self._verifier is None:
             return  # --verify not active; skip entirely
 
-        await self.goto("/yaml-wizard")
-        await self.assert_page_ok()
+        if self.human_mode:
+            ready = await self.await_human(HUMAN_GUIDANCE["yaml-wizard-signal"], "meredith::yaml-wizard-signal")
+            if not ready:
+                return
+            # Human navigated to yaml-wizard; assert page state before firing API
+            await self.assert_page_ok()
+        else:
+            await self.goto("/yaml-wizard")
+            await self.assert_page_ok()
 
         ts = time.time() - 1  # 1 s buffer for LastModified clock skew
 
@@ -126,8 +186,14 @@ class MeredithFlow(BaseFlow):
         if self._verifier is None:
             return
 
-        await self.goto("/yaml-wizard")
-        await self.assert_page_ok()
+        if self.human_mode:
+            ready = await self.await_human(HUMAN_GUIDANCE["yaml-wizard-path1-signal"], "meredith::yaml-wizard-path1-signal")
+            if not ready:
+                return
+            await self.assert_page_ok()
+        else:
+            await self.goto("/yaml-wizard")
+            await self.assert_page_ok()
 
         ts = time.time() - 1
 
@@ -160,8 +226,14 @@ class MeredithFlow(BaseFlow):
         if self._verifier is None:
             return
 
-        await self.goto("/yaml-wizard")
-        await self.assert_page_ok()
+        if self.human_mode:
+            ready = await self.await_human(HUMAN_GUIDANCE["yaml-wizard-path3-signal"], "meredith::yaml-wizard-path3-signal")
+            if not ready:
+                return
+            await self.assert_page_ok()
+        else:
+            await self.goto("/yaml-wizard")
+            await self.assert_page_ok()
 
         ts = time.time() - 1
 
@@ -184,3 +256,13 @@ class MeredithFlow(BaseFlow):
         }""")
 
         await self._verifier.verify_signals_yaml_path3(ts, response)
+
+    async def _logout_step(self) -> None:
+        if self.human_mode:
+            ready = await self.await_human(HUMAN_GUIDANCE["logout"], "meredith::logout")
+            if not ready:
+                return
+            # Human performed logout; assert we are now on /login
+            await self.page.wait_for_url("**/login**", timeout=10_000)
+        else:
+            await self.logout()
