@@ -1,6 +1,7 @@
-# certPortal — Architectural Decision Record (Sprint 1–6)
+# certPortal — Architectural Decision Record (Sprint 1–6 + playwrightcli Steps #1–5)
 
-Decisions made during Sprints 1–6 that were not explicitly covered by the build prompt.
+Decisions made during Sprints 1–6 and the playwrightcli hardening work that were not
+explicitly covered by the build prompt.
 All choices favour the most conservative, explicit, auditable option.
 
 ---
@@ -784,3 +785,89 @@ No external scheduler, no new dependencies. The uvicorn asyncio event loop hosts
 - `certportal/core/auth.py`: `cleanup_expired_revoked_tokens()` added (~8 lines).
 - `portals/pam.py`, `portals/meredith.py`, `portals/chrissy.py`: lifespan updated with cleanup task; `import asyncio` added.
 - `testing/suites/suite_a.py`: test_25 added (cleanup function behaviour).
+
+
+---
+
+## ADR-026: Meredith supplier_status() scope leak fix
+
+**Date:** 2026-03-13
+**Status:** Accepted
+
+### Context
+
+During playwrightcli Step #3 (multi-tenant scope isolation), the `SCOPE-RET-02` and
+`SCOPE-RET-04` checks failed: `lowes_retailer` could see `rival` in `/supplier-status`,
+and `target_retailer` could see `acme`. This violates INV-06 (S3 paths scoped to
+`{retailer_slug}/{supplier_slug}/`), which the portal must enforce at the DB layer too.
+
+Root cause: `portals/meredith.py` `supplier_status()` built a correctly-scoped WHERE
+clause using a `retailer_slug` variable but never assigned it from `user.get("retailer_slug")`.
+Python resolved the name as a module global (absent → effectively `None`), so `if retailer_slug:`
+evaluated False and the unscoped `else` branch always ran, returning all suppliers to all
+retailer users.
+
+### Decision
+
+Added `retailer_slug = user.get("retailer_slug")` as the first line of `supplier_status()`,
+matching the pattern already used in `home()`, `spec_setup()`, and other scoped endpoints
+in the same file.
+
+No other changes — the WHERE clause and admin (`retailer_slug=None`) fallback were already
+correct.
+
+### Why fix at root cause
+
+Per the explicit user instruction: "when bugs are found in main .py files (portals, engine),
+fix the root cause directly — no workarounds."
+
+### Consequences
+
+- `portals/meredith.py`: one line added to `supplier_status()`.
+- SCOPE-RET-01..04 now pass (12/12 scope checks green).
+- `supplier_status_partial()` already had the correct guard (`user_retailer` assignment
+  was present); no change needed there.
+
+---
+
+## ADR-027: playwrightcli isolation constraint
+
+**Date:** 2026-03-13
+**Status:** Accepted
+
+### Context
+
+`playwrightcli/` is a test harness that must remain independently runnable — it should
+not create import coupling to `certportal/`, `portals/`, `agents/`, or `lifecycle_engine/`.
+This constraint emerged explicitly when building the signal checker (Step #2) and token
+fetcher (Step #5): both need DB or S3 access but must not pull in main-codebase modules.
+
+### Decision
+
+**All code under `playwrightcli/` may only import from:**
+1. Python stdlib
+2. Third-party packages installed in `requirements.txt` (Playwright, psycopg2, boto3, etc.)
+3. Other modules within `playwrightcli/` itself
+
+**Never import from:** `certportal.*`, `portals.*`, `agents.*`, `lifecycle_engine.*`.
+
+Fixtures that need DB access use psycopg2 directly and read `CERTPORTAL_DB_URL` from `.env`
+via a local `_load_dotenv()` parser. Fixtures that need S3 access use boto3 directly and
+read S3 credentials from `.env` the same way.
+
+### Rationale
+
+| Concern | Resolution |
+|---|---|
+| Test breakage from main-codebase changes | Isolation means test failures signal real regressions, not import side-effects |
+| Auth module changes | Token fetcher reads `password_reset_tokens` directly — no auth.py dependency |
+| S3AgentWorkspace abstraction | signal_checker.py uses raw boto3 — same outcome, no coupling |
+| psycopg2 availability | Already in requirements.txt for lifecycle_engine/; safe to reuse |
+
+### Consequences
+
+- `playwrightcli/fixtures/signal_checker.py`: standalone boto3 S3 scanner.
+- `playwrightcli/fixtures/token_fetcher.py`: standalone psycopg2 DB reader.
+- `playwrightcli/flows/scope_flow.py`: standalone class (does not extend BaseFlow, does not
+  import PORTALS config indirectly from certportal).
+- Future playwrightcli fixtures must follow the same pattern.

@@ -10,6 +10,8 @@ visual quality, the requirements verifier (`--verify`) checks that each portal p
 
 Activated via: `python -m playwrightcli --portal all --verify`
 
+**Current state (Steps #1–5 complete):** 97 checks, 27 steps, 0 failures, 0 skips.
+
 ---
 
 ## Architecture
@@ -81,6 +83,29 @@ requirement with a unique ID (e.g., `PAM-DASH-01`, `MER-YAML-03`).
 | PAM-HITL-03 | Approve action available for pending items | ADR-020 | Approve button/link exists if items present |
 | PAM-HITL-04 | Reject action available for pending items | ADR-020 | Reject button/link exists if items present |
 
+#### HITL Signal Integration (SIG-HITL-*) — Step #2
+| ID | Requirement | Source | Verification |
+|----|-------------|--------|--------------|
+| SIG-HITL-01 | POST /hitl-queue/{id}/approve returns HTTP 200 | ADR-020 | fetch() status == 200 |
+| SIG-HITL-02 | kelly_approved_{id}.json written to S3 after approve | ADR-020 | SignalChecker.object_exists() |
+| SIG-HITL-03 | Signal payload contains queue_id, draft, and channel | ADR-020 | JSON key check via S3 fetch |
+
+#### Gate Enforcement (INV03-GATE-*) — Step #4
+| ID | Requirement | Source | Verification |
+|----|-------------|--------|--------------|
+| INV03-GATE-01 | Out-of-order gate POST (gate_2 while gate_1=PENDING) returns HTTP 409 | INV-03, gate_enforcer.py | fetch() status == 409 |
+| INV03-GATE-02 | 409 response body contains gate ordering error message | INV-03 | "gate"/"cannot"/"complete" in detail field |
+| INV03-GATE-03 | Legal gate-1 POST (no prerequisite, idempotent) returns HTTP 200 | INV-03 | fetch() status == 200 |
+
+#### Password Reset E2E (PW-RESET-*) — Step #5
+| ID | Requirement | Source | Verification |
+|----|-------------|--------|--------------|
+| PW-RESET-01 | POST /forgot-password redirects to /login?msg=reset_sent | ADR-023 | URL contains msg=reset_sent |
+| PW-RESET-02 | Reset token written to password_reset_tokens and retrievable | ADR-023 | TokenFetcher.get_latest_token() returns non-None |
+| PW-RESET-03 | POST /reset-password redirects to /login?msg=password_changed | ADR-023 | URL contains msg=password_changed |
+| PW-RESET-04 | Login with new password succeeds after reset | ADR-023 | URL does not contain /login after submit |
+| PW-RESET-05 | Original password restored via /change-password (idempotency) | ADR-016 | fetch() ok == True |
+
 #### Monica Memory (PAM-MEM-*)
 | ID | Requirement | Source | Verification |
 |----|-------------|--------|--------------|
@@ -126,6 +151,13 @@ requirement with a unique ID (e.g., `PAM-DASH-01`, `MER-YAML-03`).
 | MER-STATUS-03 | Gate columns visible (G1 Spec, G2 Validation, G3 Certification) | INV-03 | Gate header columns |
 | MER-STATUS-04 | Gate status badges present (PENDING/COMPLETE/CERTIFIED) | gate_enforcer.py | Badge elements with status text |
 | MER-STATUS-05 | Test pass/fail counts displayed | portals/meredith.py | Count elements in table rows |
+
+#### YAML Wizard Signal Integration (SIG-YAML2-*) — Step #2
+| ID | Requirement | Source | Verification |
+|----|-------------|--------|--------------|
+| SIG-YAML2-01 | POST /yaml-wizard/path2 returns HTTP 200 | ADR-018 | fetch() status == 200 |
+| SIG-YAML2-02 | andy_path2_trigger_*.json written to S3 | ADR-018 | SignalChecker.list_signals_since() finds key |
+| SIG-YAML2-03 | Signal payload has type=andy_yaml_path2 and retailer_slug | ADR-018 | JSON key/value check via S3 fetch |
 
 ---
 
@@ -175,11 +207,46 @@ requirement with a unique ID (e.g., `PAM-DASH-01`, `MER-YAML-03`).
 | CHR-PATCH-05 | Filter controls present (All/Pending/Applied) | portals/chrissy.py | Filter buttons or tabs |
 | CHR-PATCH-06 | Patch content viewable | ADR-019 | Content link/button exists |
 
+#### Patches — Patch Apply Signal (SIG-PATCH-*) — Step #2
+| ID | Requirement | Source | Verification |
+|----|-------------|--------|--------------|
+| SIG-PATCH-01 | POST /patches/{id}/mark-applied returns HTTP 200 | ADR-019 | fetch() status == 200 |
+| SIG-PATCH-02 | moses_revalidate_{id}_{ts}.json written to S3 | ADR-019 | SignalChecker.list_signals_since() finds key |
+| SIG-PATCH-03 | Signal payload has trigger=patch_applied and patch_id | ADR-019 | JSON key/value check via S3 fetch |
+
 #### Certification Status (CHR-CERT-*)
 | ID | Requirement | Source | Verification |
 |----|-------------|--------|--------------|
 | CHR-CERT-01 | Certification page loads without error | CLAUDE.md | No 500/error state |
 | CHR-CERT-02 | Certification badge or pending status visible | portals/chrissy.py | Badge or status element |
+
+---
+
+### SCOPE — Multi-Tenant Isolation (INV-06) — Step #3
+
+Verifies that supplier and retailer data is correctly scoped. Four users across two
+tenants (lowes/acme, target/rival) log in and confirm they can see their own data
+and cannot see the other tenant's data.
+
+#### Supplier Isolation (SCOPE-SUP-*)
+| ID | Requirement | Source | Verification |
+|----|-------------|--------|--------------|
+| SCOPE-SUP-01 | acme_supplier sees own error code (850-BEG-01) on /patches | INV-06 | "850-beg-01" in body text |
+| SCOPE-SUP-02 | acme_supplier cannot see rival error code (855-AK1-01) | INV-06 | "855-ak1-01" absent from body text |
+| SCOPE-SUP-03 | acme_supplier sees own transaction type (850) on /scenarios | INV-06 | "850" in body text |
+| SCOPE-SUP-04 | acme_supplier cannot see rival retailer "target" on /scenarios | INV-06 | "target" absent from body text |
+| SCOPE-SUP-05 | rival_supplier sees own error code (855-AK1-01) on /patches | INV-06 | "855-ak1-01" in body text |
+| SCOPE-SUP-06 | rival_supplier cannot see acme error code (850-BEG-01) | INV-06 | "850-beg-01" absent from body text |
+| SCOPE-SUP-07 | rival_supplier sees own transaction type (855) on /scenarios | INV-06 | "855" in body text |
+| SCOPE-SUP-08 | rival_supplier cannot see acme retailer "lowes" on /scenarios | INV-06 | "lowes" absent from body text |
+
+#### Retailer Isolation (SCOPE-RET-*)
+| ID | Requirement | Source | Verification |
+|----|-------------|--------|--------------|
+| SCOPE-RET-01 | lowes_retailer sees "acme" on /supplier-status | INV-06 | "acme" in body text |
+| SCOPE-RET-02 | lowes_retailer cannot see "rival" on /supplier-status | INV-06 | "rival" absent from body text |
+| SCOPE-RET-03 | target_retailer sees "rival" on /supplier-status | INV-06 | "rival" in body text |
+| SCOPE-RET-04 | target_retailer cannot see "acme" on /supplier-status | INV-06 | "acme" absent from body text |
 
 ---
 
@@ -195,122 +262,62 @@ requirement with a unique ID (e.g., `PAM-DASH-01`, `MER-YAML-03`).
 
 ---
 
-## Possible and Future Enhancements
+## Completed Enhancements (Steps #1–5)
 
-### 1. YAML Wizard Interactive Verification
-**Current gap:** The harness navigates to `/yaml-wizard` and checks that the 3-path
-tabs exist, but cannot verify that **submitting** a YAML file through Path 2 triggers
-schema validation (Andy agent + `schema_validators/validate_file()`).
+The following items from the original "Future Enhancements" list are now **implemented**:
 
-**Future:** Upload a test YAML fixture through the wizard form, verify the S3 signal
-(`andy_path2_trigger_{ts}.json`) is written, and check that the validation result
-appears in the UI. Requires a test YAML file in `playwrightcli/fixtures/`.
+| # | Enhancement | Implemented as | Step |
+|---|-------------|----------------|------|
+| 11 | Database Fixture Seeding | `playwrightcli/fixtures/seed.sql` — idempotent, covers all 9 previously-skipped checks | Step #1 |
+| 2 | Patch Apply → Moses Signal | `chrissy::patch-apply-signal` + SIG-PATCH-01..03 + `signal_checker.py` | Step #2 |
+| 3 | HITL Approve → Kelly Signal | `pam::hitl-approve-signal` + SIG-HITL-01..03 + `signal_checker.py` | Step #2 |
+| 1 | YAML Wizard Path 2 Signal | `meredith::yaml-wizard-signal` + SIG-YAML2-01..03 | Step #2 |
+| 8 | Multi-Tenant Scope Verification | `scope_flow.py` + SCOPE-SUP-01..08 + SCOPE-RET-01..04 | Step #3 |
+| 5 | Gate Enforcement UI Verification | `pam::gate-enforcement` + INV03-GATE-01..03 | Step #4 |
+| 6 | Password Reset Flow E2E | `pam::password-reset` + PW-RESET-01..05 + `token_fetcher.py` | Step #5 |
 
-### 2. Patch Apply → Moses Revalidation Signal Verification
-**Current gap:** The harness checks that "Mark Applied" buttons exist on `/patches`,
-but cannot verify that clicking the button writes the S3 revalidation signal
-(`moses_revalidate_{patch_id}_{ts}.json`).
+---
 
-**Future:** Click "Mark Applied" on a test patch, then query S3 (or check the response)
-to confirm the signal was written with correct `trigger="patch_applied"` payload.
+## Planned Enhancements (Steps #6–10)
 
-### 3. HITL Approve → Kelly Dispatch Signal Verification
-**Current gap:** Checks that approve/reject buttons exist on `/hitl-queue`, but cannot
-verify the full loop: approve → S3 signal → Kelly dispatch.
+See `TODO.md` for full detail. Summary:
 
-**Future:** Approve a test HITL item, verify the S3 signal
-(`kelly_approved_{queue_id}.json`) exists, optionally trigger Kelly's
-`--dispatch-approved` and verify the message was sent.
+| Step | Focus | New req IDs |
+|------|-------|-------------|
+| #6 | **JWT revocation E2E** — logout → reuse old token → 401 | JWT-REV-01..03 |
+| #7 | **RBAC cross-portal** — supplier→PAM 403, retailer→Chrissy 403 | RBAC-01..03 |
+| #8 | **Certification full flow** — gate_3=CERTIFIED reflected in Chrissy UI | CHR-CERT-03..04 |
+| #9 | **Monica escalation pipeline** — FAIL occurrence → HITL queue write | MON-ESC-01..03 |
+| #10 | **Andy path 1 & 3 signals** — complete signal coverage for all 3 ingestion paths | SIG-YAML1/YAML3 |
 
-### 4. Lifecycle State Progression End-to-End
-**Current gap:** Chrissy's `/scenarios` page shows test results, but the harness cannot
-verify the full lifecycle: 850 → 855 → 856 → 810 state progression as reflected in
-the supplier's gate advancement.
+---
 
-**Future:** Seed the database with a known PO lifecycle (via SQL fixtures or Moses CLI),
-then verify that Chrissy's dashboard shows the correct gate states and that the
-scenarios page reflects the expected PASS/FAIL status per transaction type.
+## Remaining Future Enhancements (not yet scheduled)
 
-### 5. Gate Enforcement UI Verification
-**Current gap:** The harness checks that gate badges exist, but cannot test that
-attempting to skip a gate (e.g., advancing G3 before G2) shows an error.
+### Refresh Token Rotation Verification
+**Gap:** Auth checks verify login, but not that expired access tokens are silently refreshed.
+**Future:** Manually expire access token cookie, navigate, verify `/token/refresh` fires.
 
-**Future:** Use an admin session in PAM to attempt out-of-order gate progression via
-HTMX POST, verify that the 409 Conflict response is handled gracefully in the UI
-with an appropriate error message.
+### Agent Roster Status Verification (PAM)
+**Gap:** Agent names on dashboard are verified but not their live status indicators.
+**Future:** Seed known agent activity, verify PAM roster shows correct last-run timestamps.
 
-### 6. Password Reset Flow End-to-End
-**Current gap:** Checks that "Forgot password?" link exists on login pages, but cannot
-verify the full flow: forgot → email → reset token → new password → login.
+### HTMX Polling Verification
+**Gap:** HTMX library load is verified but polling endpoints are not exercised.
+**Future:** Use `page.route()` to intercept polling XHR and verify DOM updates.
 
-**Future:** Navigate the forgot-password form, intercept or mock the SMTP call,
-extract the reset token, complete the reset flow, and verify login with new credentials.
-Requires SMTP mock or test mailbox integration.
+### Accessibility Requirements (WCAG AA)
+**Gap:** Design observer checks visuals; programmatic accessibility not checked.
+**Future:** `page.accessibility.snapshot()` — ARIA landmarks, form labels, heading hierarchy.
 
-### 7. Refresh Token Rotation Verification
-**Current gap:** Authentication checks verify login works, but cannot test that an
-expired access token is silently refreshed via the refresh token cookie.
+### Cross-Portal Navigation Consistency
+**Gap:** Portals tested independently; shared nav/logout patterns not compared.
+**Future:** Compare nav structure, footer layout, and logout behavior across all three portals.
 
-**Future:** Login, manually expire the access token cookie (set a past expiry), make a
-navigation request, and verify that `/token/refresh` is called and a new access token
-is issued without redirecting to `/login`.
-
-### 8. Multi-Tenant Scope Verification
-**Current gap:** Each portal is tested with a single user. Cannot verify that a retailer
-user cannot see another retailer's data, or that a supplier user is scoped correctly.
-
-**Future:** Create two test users with different `retailer_slug` / `supplier_slug` scopes.
-Login as each and verify that data is properly scoped — User A cannot see User B's
-suppliers, patches, or scenarios.
-
-### 9. Agent Roster Status Verification (PAM)
-**Current gap:** Checks that agent names appear on the PAM dashboard, but cannot verify
-that agent status indicators reflect real state (e.g., Monica last ran at X, Kelly
-has N pending dispatches).
-
-**Future:** Seed the database with known agent activity, verify that PAM's agent roster
-shows correct last-run timestamps and status indicators.
-
-### 10. HTMX Polling Verification
-**Current gap:** Checks that HTMX is loaded, but cannot verify that polling endpoints
-(`hx-trigger="every 30s"`) are actually firing and updating content.
-
-**Future:** Wait 30+ seconds on a page with HTMX polling, intercept the XHR request,
-and verify that the partial HTML response updates the target element. Use
-`page.route()` to mock the polling response with known data and verify DOM update.
-
-### 11. Database Fixture Seeding
-**Current gap:** Verification results depend on database state. Empty tables produce
-empty-state UI, which passes checks but doesn't verify data rendering.
-
-**Future:** Create a `playwrightcli/fixtures/seed.sql` that inserts known test data
-(retailers, suppliers, gate statuses, test occurrences, patches, HITL items, Monica
-memory entries). Run before `--verify` to ensure all pages have data to render.
-This transforms empty-state checks into data-rendering checks.
-
-### 12. Accessibility Requirements (WCAG AA)
-**Current gap:** The design observer checks contrast ratios visually. The requirements
-harness could check programmatic accessibility.
-
-**Future:** Use `page.accessibility.snapshot()` to verify: ARIA landmarks exist,
-form inputs have labels, buttons have accessible names, heading hierarchy is correct
-(h1 → h2 → h3, no skips), focus indicators are visible.
-
-### 13. Cross-Portal Navigation Consistency
-**Current gap:** Each portal is tested independently. Cannot verify that shared
-patterns (nav bar structure, logout flow, change-password flow) are consistent.
-
-**Future:** After verifying all portals, compare their navigation structures:
-same number of nav items, same footer layout, same logout behavior. Flag
-inconsistencies as WARN.
-
-### 14. Error Page Verification
-**Current gap:** The harness verifies happy paths. Cannot verify that error states
-(401, 403, 404, 500) render appropriately.
-
-**Future:** Navigate to non-existent routes (`/nonexistent`), attempt unauthorized
-access (logout then hit protected route), and verify that error pages render with
-correct status codes and user-friendly messages (not raw stack traces).
+### Error Page Verification
+**Gap:** Happy paths only; 401/403/404/500 error rendering not checked.
+**Future:** Navigate to non-existent routes and unauthorized pages; verify error pages render
+correctly with user-friendly messages, not raw stack traces.
 
 ---
 
@@ -351,12 +358,19 @@ python -m playwrightcli --portal all
 {PORTAL}-{AREA}-{NUMBER}
 ```
 
-| Prefix | Portal |
+| Prefix | Portal / Domain |
 |--------|--------|
 | PAM | Admin portal (Pam) |
 | MER | Retailer portal (Meredith) |
 | CHR | Supplier portal (Chrissy) |
+| SCOPE | Multi-tenant scope isolation (all portals) |
 | XPORT | Cross-portal shared requirements |
+| SIG | S3 signal integration (Step #2) |
+| INV03 | Gate enforcement invariant (Step #4) |
+| PW | Password reset flow (Step #5) |
+| JWT | JWT revocation (Step #6, planned) |
+| RBAC | Role-based access control (Step #7, planned) |
+| MON | Monica escalation pipeline (Step #9, planned) |
 
 | Area | Domain |
 |------|--------|
@@ -373,6 +387,9 @@ python -m playwrightcli --portal all
 | ERR | Validation errors |
 | PATCH | Patches / Ryan's suggestions |
 | CERT | Certification status |
+| GATE | Gate enforcement checks |
+| RESET | Password reset flow |
+| SUP/RET | Scope isolation checks (within SCOPE prefix) |
 
 ---
 

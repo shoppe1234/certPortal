@@ -2,9 +2,10 @@
 
 ## Project State
 
-Sprints 1–6 are complete. All modules below are built, tested, and committed.
-See `DECISIONS.md` (ADR-001 through ADR-025) for the authoritative record of every
-architectural decision made during Sprints 1–6.
+Sprints 1–6 are complete. playwrightcli Steps #1–5 are complete (97 checks, 27 steps, 0 failures).
+See `DECISIONS.md` (ADR-001 through ADR-027) for the authoritative record of every
+architectural decision made during Sprints 1–6 and the playwrightcli hardening work.
+See `TODO.md` for planned Steps #6–10 and root-level engineering to-dos.
 
 ## Architecture Invariants — NEVER VIOLATE
 - INV-01: Agents never import each other. S3 is the only inter-agent channel.
@@ -113,6 +114,42 @@ Auth on all portals: /login, /token, /token/refresh, /logout, /change-password, 
 
 Run: `python -m testing.certportal_jules_test`
 
+## playwrightcli E2E Harness (Steps #1–5 complete)
+Self-correcting Playwright CLI with requirements verification. 97 checks, 0 failures.
+
+### Steps completed
+- **Step #1** — `playwrightcli/fixtures/seed.sql`: idempotent test data for all 9 previously-skipped checks
+- **Step #2** — Signal integration: YAML Wizard Path 2 → S3, Patch Apply → S3, HITL Approve → S3
+- **Step #3** — Multi-tenant scope isolation: suppliers/retailers cannot see each other's data (INV-06)
+- **Step #4** — Gate enforcement UI: out-of-order advance returns 409, legal advance returns 200 (INV-03)
+- **Step #5** — Password reset E2E: forgot → DB token → reset → login → restore (fully idempotent)
+
+### Key files
+- `playwrightcli/fixtures/seed.sql`          — idempotent test data (apply before first run)
+- `playwrightcli/fixtures/signal_checker.py` — standalone S3 signal scanner (no main codebase imports)
+- `playwrightcli/fixtures/token_fetcher.py`  — standalone DB reader for password_reset_tokens
+- `playwrightcli/flows/scope_flow.py`        — multi-tenant scope isolation flow (standalone, no BaseFlow)
+- `playwrightcli/requirements_verifier.py`   — all verify_* methods; accumulates PASS/FAIL/SKIP
+
+### Isolation constraint (ADR-027)
+playwrightcli/ must NEVER import from certportal/, portals/, agents/, or lifecycle_engine/.
+All fixtures use only stdlib + psycopg2 + boto3 (third-party only).
+
+### Run
+```bash
+# Apply seed once (or after resetting DB)
+psql "$CERTPORTAL_DB_URL" -f playwrightcli/fixtures/seed.sql
+
+# Full run — headed, with requirements verification
+python -m playwrightcli --portal all --verify
+
+# Headless, idempotent
+python -m playwrightcli --portal all --verify --headless
+
+# Dry-run: show steps and req IDs without opening browser
+python -m playwrightcli --portal all --verify --dry-run
+```
+
 ## Key File Locations
 - edi_framework/lifecycle/order_to_cash.yaml  — state machine definition
 - edi_framework/lowes_master.yaml             — transaction registry
@@ -120,3 +157,4 @@ Run: `python -m testing.certportal_jules_test`
 - lifecycle_engine/config.yaml               — engine config (strict_mode profiles)
 - certportal/core/auth.py                    — JWT + bcrypt + revocation + password reset
 - certportal/core/email_utils.py             — SMTP helper for reset emails
+- playwrightcli/fixtures/seed.sql            — E2E test data seed (apply before harness)
