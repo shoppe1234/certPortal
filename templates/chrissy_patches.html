@@ -63,6 +63,13 @@
               hx-on::after-request="filterPatches(window._activeFilter || 'all')">
         ✓ Mark Applied
       </button>
+      <button class="btn btn-xs btn-warn"
+              hx-post="/patches/{{ p.id }}/reject"
+              hx-target="closest .patch-card"
+              hx-swap="outerHTML"
+              hx-confirm="Reject this patch suggestion?">
+        Reject
+      </button>
       {% endif %}
     </div>
   </div>

@@ -134,29 +134,29 @@ class RequirementsVerifier:
         no_error = "500" not in title and "error" not in title.lower()
         self._record("PAM-SUP-01", "Suppliers page loads without error", no_error)
 
-        table_el = await page.query_selector("table, .empty-state")
+        content_el = await page.query_selector("table, .empty-state")
         has_content = await page.query_selector("main, h1, h2")
         self._record("PAM-SUP-02", "Table or empty-state renders",
-                      table_el is not None or has_content is not None)
+                      content_el is not None or has_content is not None)
 
-        # PAM-SUP-03: Gate status badges
+        # PAM-SUP-03 & 04: Only check gate data when actual table rows exist
+        data_table = await page.query_selector("table tbody tr")
         body_text = (await page.text_content("body") or "").lower()
-        has_gates = ("gate" in body_text or "g1" in body_text or "g2" in body_text
-                     or "g3" in body_text or "pending" in body_text
-                     or "complete" in body_text or "certified" in body_text)
-        self._record("PAM-SUP-03", "Gate status badges visible", has_gates)
+        if data_table is not None:
+            has_gates = ("gate" in body_text or "g1" in body_text or "g2" in body_text
+                         or "g3" in body_text or "pending" in body_text
+                         or "complete" in body_text or "certified" in body_text)
+            self._record("PAM-SUP-03", "Gate status badges visible", has_gates)
 
-        # PAM-SUP-04: Gate progression buttons
-        gate_buttons = await page.query_selector_all(
-            'button:has-text("G1"), button:has-text("G2"), button:has-text("G3"), '
-            'button:has-text("Certif"), a:has-text("G1"), a:has-text("G2"), a:has-text("G3")'
-        )
-        # Buttons may not exist if table is empty — that's OK, just record
-        if table_el is not None:
+            gate_buttons = await page.query_selector_all(
+                'button:has-text("G1"), button:has-text("G2"), button:has-text("G3"), '
+                'button:has-text("Certif"), a:has-text("G1"), a:has-text("G2"), a:has-text("G3")'
+            )
             self._record("PAM-SUP-04", "Gate progression buttons present",
                           len(gate_buttons) > 0 or "certified" in body_text,
                           f"Found {len(gate_buttons)} gate buttons")
         else:
+            self._skip("PAM-SUP-03", "Gate status badges visible", "No suppliers in table")
             self._skip("PAM-SUP-04", "Gate progression buttons present", "No suppliers in table")
 
     async def verify_pam_hitl_queue(self, page) -> None:
@@ -308,10 +308,11 @@ class RequirementsVerifier:
         self._record("MER-STATUS-03", "Gate columns visible (Spec/Validation/Certification)",
                       has_gate_cols)
 
-        # MER-STATUS-04: Gate status badges
+        # MER-STATUS-04: Gate status badges (only check when rows exist)
         has_badges = ("pending" in body_text or "complete" in body_text
                       or "certified" in body_text)
-        if table_el is not None:
+        data_row = await page.query_selector("table tbody tr")
+        if data_row is not None:
             self._record("MER-STATUS-04", "Gate status badges present", has_badges)
         else:
             self._skip("MER-STATUS-04", "Gate status badges present", "No suppliers in table")
@@ -410,11 +411,12 @@ class RequirementsVerifier:
         else:
             self._skip("CHR-SCEN-03", "Status badges (PASS/FAIL/PARTIAL)", "No scenarios data")
 
-        # CHR-SCEN-04: Transaction type visible
+        # CHR-SCEN-04: Transaction type visible (only check when scenario cards exist)
         has_tx_type = ("850" in body_text or "855" in body_text or "856" in body_text
                        or "810" in body_text or "860" in body_text or "865" in body_text
                        or "transaction" in body_text)
-        if table_el is not None:
+        scenario_card = await page.query_selector(".scenario-card")
+        if scenario_card is not None:
             self._record("CHR-SCEN-04", "Transaction type visible", has_tx_type)
         else:
             self._skip("CHR-SCEN-04", "Transaction type visible", "No scenarios data")
@@ -429,12 +431,13 @@ class RequirementsVerifier:
 
     async def verify_chrissy_errors(self, page) -> None:
         """Verify Chrissy errors page (CHR-ERR-*)."""
+        # Check for 500 specifically — "error" appears legitimately in "Validation Errors"
         title = ""
         try:
             title = await page.title()
         except Exception:
             pass
-        no_error = "500" not in title and "error" not in title.lower()
+        no_error = "500" not in title and "internal server error" not in title.lower()
         self._record("CHR-ERR-01", "Errors page loads without error", no_error)
 
         has_content = await page.query_selector("main, h1, h2")
@@ -494,13 +497,16 @@ class RequirementsVerifier:
         else:
             self._skip("CHR-PATCH-03", "'Mark Applied' action available", "No patches present")
 
-        # CHR-PATCH-04: Reject action
+        # CHR-PATCH-04: Reject action (only relevant when pending patches exist)
         reject_btn = await page.query_selector(
             'button:has-text("Reject"), [hx-post*="reject"]'
         )
-        if table_el is not None and "patch" in body_text:
+        pending_btn = await page.query_selector('[hx-post*="mark-applied"]')
+        if table_el is not None and "patch" in body_text and pending_btn is not None:
             self._record("CHR-PATCH-04", "'Reject' action available",
                           reject_btn is not None or "reject" in body_text)
+        elif table_el is not None and "patch" in body_text:
+            self._skip("CHR-PATCH-04", "'Reject' action available", "All patches already applied")
         else:
             self._skip("CHR-PATCH-04", "'Reject' action available", "No patches present")
 

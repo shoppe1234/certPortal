@@ -377,7 +377,7 @@ async def home(
     supplier_slug = user.get("supplier_slug") or "demo"
 
     row = await conn.fetchrow(
-        "SELECT supplier_slug, gate_1, gate_2, gate_3, last_updated FROM hitl_gate_status WHERE supplier_slug = $1",
+        "SELECT supplier_id AS supplier_slug, gate_1, gate_2, gate_3, last_updated FROM hitl_gate_status WHERE supplier_id = $1",
         supplier_slug,
     )
     supplier = (
