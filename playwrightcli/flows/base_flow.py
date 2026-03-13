@@ -13,12 +13,21 @@ from playwrightcli.config import TIMEOUTS
 
 if TYPE_CHECKING:
     from playwrightcli.observer import ObserverFrame
+    from playwrightcli.requirements_verifier import RequirementsVerifier
 
 
 class BaseFlow:
     """Base class for PamFlow, MeredithFlow, ChrissyFlow."""
 
-    def __init__(self, page, config: dict, runner, *, observer_queue: asyncio.Queue | None = None) -> None:
+    def __init__(
+        self,
+        page,
+        config: dict,
+        runner,
+        *,
+        observer_queue: asyncio.Queue | None = None,
+        verifier: RequirementsVerifier | None = None,
+    ) -> None:
         self.page = page
         self.config = config
         self.runner = runner
@@ -27,6 +36,7 @@ class BaseFlow:
         self.password: str = config["password"]
         self._logged_in: bool = False
         self._observer_queue = observer_queue
+        self._verifier = verifier
         self._portal: str = config.get("role", "unknown")
 
     # ------------------------------------------------------------------
@@ -108,6 +118,24 @@ class BaseFlow:
             url=self.page.url,
         )
         await self._observer_queue.put(frame)
+
+    # ------------------------------------------------------------------
+    # Requirements verification
+    # ------------------------------------------------------------------
+
+    async def verify(self, step: str) -> None:
+        """Run business requirement checks on the current page.
+
+        No-op if --verify mode is not active (verifier is None).
+        Called by each flow after navigating + waiting for HTMX to settle.
+        """
+        if self._verifier is None:
+            return
+
+        # Map role -> portal name for consistent step keys
+        portal_name_map = {"admin": "pam", "retailer": "meredith", "supplier": "chrissy"}
+        portal = portal_name_map.get(self._portal, self._portal)
+        await self._verifier.verify(f"{portal}::{step}", self.page)
 
     # ------------------------------------------------------------------
     # Navigation helpers

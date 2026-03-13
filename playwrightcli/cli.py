@@ -4,6 +4,7 @@ Usage:
   python -m playwrightcli --portal all            # run all portals, headed (default)
   python -m playwrightcli --portal pam --headless # PAM only, no browser window
   python -m playwrightcli --portal all --observe  # run + real-time design observer
+  python -m playwrightcli --portal all --verify   # run + business requirements verification
   python -m playwrightcli --consolidate           # update memory.md from feedback.md
   python -m playwrightcli --portal all --dry-run  # show planned steps, read memory
 """
@@ -54,6 +55,7 @@ async def _run_portal(
     headless: bool,
     runner: StepRunner,
     observer_queue: asyncio.Queue | None = None,
+    verifier=None,
 ) -> None:
     from playwright.async_api import async_playwright
 
@@ -77,6 +79,7 @@ async def _run_portal(
                 config=PORTALS[name],
                 runner=runner,
                 observer_queue=observer_queue,
+                verifier=verifier,
             )
             await flow.run()
         finally:
@@ -88,7 +91,12 @@ async def _run_portal(
 # Observed run — Playwright + observer consumer as concurrent tasks
 # ------------------------------------------------------------------
 
-async def _run_observed(portal_names: list[str], headless: bool, runner: StepRunner) -> None:
+async def _run_observed(
+    portal_names: list[str],
+    headless: bool,
+    runner: StepRunner,
+    verifiers: dict | None = None,
+) -> None:
     """Run portal flows with a concurrent design observer consuming screenshots."""
     from playwrightcli.observer import DesignObserver
 
@@ -102,7 +110,8 @@ async def _run_observed(portal_names: list[str], headless: bool, runner: StepRun
     # but the observer processes screenshots concurrently
     for name in portal_names:
         print(f"=== {name.upper()} ===")
-        await _run_portal(name, headless, runner, observer_queue=queue)
+        verifier = verifiers.get(name) if verifiers else None
+        await _run_portal(name, headless, runner, observer_queue=queue, verifier=verifier)
         print()
 
     # Signal observer to stop and wait for it to finish processing
@@ -119,7 +128,7 @@ async def _run_observed(portal_names: list[str], headless: bool, runner: StepRun
 # Dry-run display
 # ------------------------------------------------------------------
 
-def _dry_run(portal_names: list[str], mm: MemoryManager) -> None:
+def _dry_run(portal_names: list[str], mm: MemoryManager, verify: bool = False) -> None:
     from playwrightcli.flows.pam_flow import PAM_STEPS
     from playwrightcli.flows.meredith_flow import MEREDITH_STEPS
     from playwrightcli.flows.chrissy_flow import CHRISSY_STEPS
@@ -128,6 +137,23 @@ def _dry_run(portal_names: list[str], mm: MemoryManager) -> None:
         "pam": PAM_STEPS,
         "meredith": MEREDITH_STEPS,
         "chrissy": CHRISSY_STEPS,
+    }
+
+    # Requirement IDs that will be checked per step
+    req_map = {
+        "pam::login": ["PAM-AUTH-03..08", "PAM-DASH-01..04", "XPORT-02,03,05"],
+        "pam::retailers": ["PAM-RET-01..03"],
+        "pam::suppliers": ["PAM-SUP-01..04"],
+        "pam::hitl-queue": ["PAM-HITL-01..04"],
+        "pam::monica-memory": ["PAM-MEM-01..03"],
+        "meredith::login": ["MER-AUTH-02,04", "XPORT-02,03,05"],
+        "meredith::spec-setup": ["MER-SPEC-01..05"],
+        "meredith::supplier-status": ["MER-STATUS-01..05"],
+        "chrissy::login": ["CHR-AUTH-02,04", "CHR-DASH-01..05", "XPORT-02,03,05"],
+        "chrissy::scenarios": ["CHR-SCEN-01..05"],
+        "chrissy::errors": ["CHR-ERR-01..04"],
+        "chrissy::patches": ["CHR-PATCH-01..06"],
+        "chrissy::certification": ["CHR-CERT-01..02"],
     }
 
     print("\n--- DRY RUN (no browser opened) ---\n")
@@ -140,6 +166,15 @@ def _dry_run(portal_names: list[str], mm: MemoryManager) -> None:
         print("  (empty — no memory recorded yet)")
     print()
 
+    # Load requirements history for trend context
+    req_mem = None
+    if verify:
+        from playwrightcli.requirements_memory import RequirementsMemory
+        req_mem = RequirementsMemory()
+        run_count = req_mem.get_run_count()
+        if run_count > 0:
+            print(f"Requirements history: {run_count} previous run(s) recorded\n")
+
     for portal in portal_names:
         print(f"=== {portal.upper()} ===")
         for step in step_map.get(portal, []):
@@ -147,6 +182,18 @@ def _dry_run(portal_names: list[str], mm: MemoryManager) -> None:
             corrections = mm.get_corrections(full_name)
             corr_str = f"  [known corrections: {', '.join(corrections)}]" if corrections else ""
             print(f"  {full_name}{corr_str}")
+            if verify and full_name in req_map:
+                req_ids_str = ", ".join(req_map[full_name])
+                print(f"    -> verify: {req_ids_str}")
+                # Show history for failing requirements
+                if req_mem and req_mem.get_run_count() > 0:
+                    for req_range in req_map[full_name]:
+                        # Parse individual IDs from ranges like "PAM-AUTH-03..08"
+                        # For display, just show latest status from history
+                        latest = req_mem.get_latest_status(req_range)
+                        if latest and latest == "FAIL":
+                            consec = req_mem.get_consecutive_failures(req_range)
+                            print(f"       {req_range}: FAIL ({consec} consecutive)")
         print()
 
 
@@ -178,6 +225,12 @@ def main() -> None:
         help="Enable real-time design observer: capture screenshots, analyze via Claude Vision",
     )
     parser.add_argument(
+        "--verify",
+        action="store_true",
+        default=False,
+        help="Enable business requirements verification: DOM assertions against requirements checklist",
+    )
+    parser.add_argument(
         "--consolidate",
         action="store_true",
         default=False,
@@ -198,6 +251,14 @@ def main() -> None:
         print("Consolidating feedback.md -> memory.md ...")
         mm.consolidate()
         print("Done. memory.md updated.")
+
+        # Also consolidate requirements memory if history exists
+        from playwrightcli.requirements_memory import RequirementsMemory
+        req_mem = RequirementsMemory()
+        if req_mem.get_run_count() > 0:
+            print("Consolidating requirements_history.jsonl -> requirements_memory.md ...")
+            req_mem.consolidate()
+            print(f"Done. requirements_memory.md updated ({req_mem.get_run_count()} runs analyzed).")
         return
 
     portal_names = (
@@ -209,7 +270,7 @@ def main() -> None:
 
     # ---- dry-run mode ----
     if args.dry_run:
-        _dry_run(portal_names, mm)
+        _dry_run(portal_names, mm, verify=args.verify)
         return
 
     # ---- normal run ----
@@ -218,6 +279,7 @@ def main() -> None:
     print(f"Portals     : {', '.join(portal_names)}")
     print(f"Mode        : {'headless' if args.headless else 'headed (browser visible)'}")
     print(f"Observer    : {'ACTIVE — screenshots + Claude Vision analysis' if args.observe else 'off'}")
+    print(f"Verifier    : {'ACTIVE — DOM-based requirements checks' if args.verify else 'off'}")
     print()
 
     print("Pre-flight check:")
@@ -233,18 +295,66 @@ def main() -> None:
 
     runner = StepRunner(memory_manager=mm)
 
+    # ---- create per-portal verifiers if --verify is active ----
+    verifiers: dict | None = None
+    if args.verify:
+        from playwrightcli.requirements_verifier import RequirementsVerifier
+        verifiers = {name: RequirementsVerifier(portal=name) for name in portal_names}
+
     if args.observe:
         # Run with concurrent observer (single event loop)
-        asyncio.run(_run_observed(portal_names, args.headless, runner))
+        asyncio.run(_run_observed(portal_names, args.headless, runner, verifiers=verifiers))
     else:
         # Original behavior — no observer
         for name in portal_names:
             print(f"=== {name.upper()} ===")
-            asyncio.run(_run_portal(name, args.headless, runner))
+            verifier = verifiers.get(name) if verifiers else None
+            asyncio.run(_run_portal(name, args.headless, runner, verifier=verifier))
             print()
 
     # Flush failures to feedback.md
     runner.write_feedback(mm)
+
+    # ---- write requirements reports if --verify was active ----
+    if verifiers:
+        from playwrightcli.requirements_verifier import write_summary
+        from playwrightcli.requirements_memory import RequirementsMemory
+
+        print("\n--- Requirements Verification ---")
+        report_paths = []
+        for name, v in verifiers.items():
+            path = v.write_report()
+            report_paths.append(path)
+            total_v = v.pass_count + v.fail_count + v.skip_count
+            print(f"  {name.upper():10s}  PASS: {v.pass_count}  FAIL: {v.fail_count}  SKIP: {v.skip_count}  ({total_v} checks)")
+
+        summary_path = write_summary(list(verifiers.values()))
+        print(f"\n  Reports written to: requirements_reports/")
+        print(f"  Summary: {summary_path}")
+
+        # Record this run to requirements memory (feedback + JSONL history)
+        req_mem = RequirementsMemory()
+        req_mem.record_run(list(verifiers.values()))
+        req_mem.consolidate()
+        run_count = req_mem.get_run_count()
+        print(f"  History: run #{run_count} recorded -> requirements_memory.md updated")
+
+        # Show trend alerts if we have history
+        if run_count > 1:
+            verifier_list = list(verifiers.values())
+            for v in verifier_list:
+                for r in v.results:
+                    consec = req_mem.get_consecutive_failures(r.req_id)
+                    if consec >= 3:
+                        print(f"  ALERT: {r.req_id} has failed {consec} consecutive runs")
+
+        # Overall requirements verdict
+        total_fail = sum(v.fail_count for v in verifiers.values())
+        if total_fail > 0:
+            print(f"\n  {total_fail} requirement(s) FAILED — see reports for details.")
+        else:
+            print("\n  All requirements PASSED.")
+        print()
 
     # Summary
     total = runner.pass_count + runner.fail_count
