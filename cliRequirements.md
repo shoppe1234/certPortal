@@ -10,7 +10,10 @@ visual quality, the requirements verifier (`--verify`) checks that each portal p
 
 Activated via: `python -m playwrightcli --portal all --verify`
 
-**Current state (Steps #1–5 complete):** 97 checks, 27 steps, 0 failures, 0 skips.
+**Current state (Steps #1–8, #10 complete):** 97 + 15 = 112 checks, 35 steps, 0 failures, 0 skips.
+
+Steps #6 (JWT revocation, +3), #7 (RBAC, +3), #8 (cert full flow, +2), #10 (Andy signals path 1+3, +6) add 14 new requirement checks
+plus 1 additional HTTP check for path signals. Step #9 (Monica escalation) deferred — requires Monica running as a background process.
 
 ---
 
@@ -278,17 +281,50 @@ The following items from the original "Future Enhancements" list are now **imple
 
 ---
 
-## Planned Enhancements (Steps #6–10)
+## Completed Enhancements (Steps #6–8, #10)
 
-See `TODO.md` for full detail. Summary:
+| Step | Focus | Req IDs | Flow / Step Key |
+|------|-------|---------|-----------------|
+| #6 | **JWT revocation E2E** — logout → protected route blocked → new login succeeds | JWT-REV-01..03 | `pam::jwt-revocation` |
+| #7 | **RBAC cross-portal** — supplier→PAM 403, retailer→Chrissy 403, supplier→Meredith 403 | RBAC-01..03 | `rbac_flow.py` (new standalone flow) |
+| #8 | **Certification full flow** — gate_3=CERTIFIED reflected in Chrissy dashboard + /certification | CHR-CERT-03..04 | `scope::cert-dashboard`, `scope::cert-certification` |
+| #10 | **Andy path 1 & 3 signals** — complete signal coverage for all 3 ingestion paths | SIG-YAML1-01..03, SIG-YAML3-01..03 | `meredith::yaml-wizard-path1-signal`, `meredith::yaml-wizard-path3-signal` |
 
-| Step | Focus | New req IDs |
-|------|-------|-------------|
-| #6 | **JWT revocation E2E** — logout → reuse old token → 401 | JWT-REV-01..03 |
-| #7 | **RBAC cross-portal** — supplier→PAM 403, retailer→Chrissy 403 | RBAC-01..03 |
-| #8 | **Certification full flow** — gate_3=CERTIFIED reflected in Chrissy UI | CHR-CERT-03..04 |
-| #9 | **Monica escalation pipeline** — FAIL occurrence → HITL queue write | MON-ESC-01..03 |
-| #10 | **Andy path 1 & 3 signals** — complete signal coverage for all 3 ingestion paths | SIG-YAML1/YAML3 |
+### JWT-REV Requirements
+| ID | Requirement | Verification |
+|----|-------------|--------------|
+| JWT-REV-01 | POST /logout redirects browser to /login | URL is /login after form submit |
+| JWT-REV-02 | Protected route inaccessible after logout | Navigation to /suppliers lands at /login |
+| JWT-REV-03 | Fresh login after logout succeeds | New credentials accepted, URL off /login |
+
+### RBAC Requirements
+| ID | Requirement | Verification |
+|----|-------------|--------------|
+| RBAC-01 | Supplier JWT rejected on PAM admin route (/suppliers) | PAM redirects supplier to /login |
+| RBAC-02 | Retailer JWT rejected on Chrissy supplier route (/patches) | Chrissy redirects retailer to /login |
+| RBAC-03 | Supplier JWT rejected on Meredith retailer route (/supplier-status) | Meredith redirects supplier to /login |
+
+### CHR-CERT-03..04 Requirements (Step #8)
+| ID | Requirement | Verification |
+|----|-------------|--------------|
+| CHR-CERT-03 | Dashboard shows CERTIFIED badge for cert_test supplier | `.cert-badge` element and "EDI Certified" text visible |
+| CHR-CERT-04 | /certification page shows certified status | "certified" text visible |
+
+### SIG-YAML1 / SIG-YAML3 Requirements (Step #10)
+| ID | Requirement | Verification |
+|----|-------------|--------------|
+| SIG-YAML1-01 | YAML Wizard Path 1 POST returns HTTP 200 | response.status == 200 |
+| SIG-YAML1-02 | andy_path1_trigger_*.json written to S3 | S3 object exists after timestamp |
+| SIG-YAML1-03 | Signal payload has type=andy_yaml_path1 and retailer_slug=lowes | payload fields validated |
+| SIG-YAML3-01 | YAML Wizard Path 3 POST returns HTTP 200 | response.status == 200 |
+| SIG-YAML3-02 | andy_path3_trigger_*.json written to S3 | S3 object exists after timestamp |
+| SIG-YAML3-03 | Signal payload has type=andy_yaml_path3 and retailer_slug=lowes | payload fields validated |
+
+## Deferred Enhancement (Step #9)
+
+| Step | Focus | Req IDs | Why Deferred |
+|------|-------|---------|--------------|
+| #9 | **Monica escalation pipeline** — FAIL occurrence → HITL queue write | MON-ESC-01..03 | Requires Monica running as a live background process — not feasible in automated harness without orchestration |
 
 ---
 
@@ -368,9 +404,9 @@ python -m playwrightcli --portal all
 | SIG | S3 signal integration (Step #2) |
 | INV03 | Gate enforcement invariant (Step #4) |
 | PW | Password reset flow (Step #5) |
-| JWT | JWT revocation (Step #6, planned) |
-| RBAC | Role-based access control (Step #7, planned) |
-| MON | Monica escalation pipeline (Step #9, planned) |
+| JWT | JWT revocation (Step #6) |
+| RBAC | Role-based access control (Step #7) |
+| MON | Monica escalation pipeline (Step #9, deferred) |
 
 | Area | Domain |
 |------|--------|

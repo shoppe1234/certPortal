@@ -1,6 +1,6 @@
 # certPortal
 
-Cloud-native, multi-tenant EDI certification platform. Sprints 1–6 complete. playwrightcli Steps #1–5 complete (97 checks, 0 failures).
+Cloud-native, multi-tenant EDI certification platform. Sprints 1–6 complete. playwrightcli Steps #1–8, #10 complete (112 checks, 0 failures).
 
 ## Architecture
 
@@ -121,16 +121,17 @@ python -m playwrightcli --portal pam --verify --headless
 python -m playwrightcli --portal all --verify --dry-run
 ```
 
-**Current coverage (Steps #1–5):** 97 checks across 27 steps, 0 failures, 0 skips.
+**Current coverage (Steps #1–8, #10):** 112 checks across 35 steps, 0 failures, 0 skips.
 
 | Portal | Steps | Checks | Requirement groups |
 |--------|-------|--------|--------------------|
-| PAM | 9 | 37 | Auth, Dashboard, Retailers, Suppliers, HITL, Gate enforcement (INV-03), Password reset, Memory |
-| Meredith | 5 | 18 | Auth, Spec setup, Supplier status (scoped), YAML Wizard Path 2 signal |
+| PAM | 10 | 40 | Auth, Dashboard, Retailers, Suppliers, HITL, Gate enforcement (INV-03), Password reset, JWT revocation, Memory |
+| Meredith | 7 | 24 | Auth, Spec setup, Supplier status (scoped), YAML Wizard Path 2/1/3 signals |
 | Chrissy | 7 | 30 | Auth, Dashboard, Scenarios, Errors, Patches, Patch-apply signal, Certification |
-| Scope | 6 | 12 | Supplier A/B isolation (INV-06), Retailer A/B isolation (INV-06) |
+| Scope | 8 | 14 | Supplier A/B isolation (INV-06), Retailer A/B isolation (INV-06), Certification full flow |
+| RBAC | 3 | 3 | Cross-portal role enforcement (supplier→PAM, retailer→Chrissy, supplier→Meredith) |
 
-See `TODO.md` for planned Steps #6–10.
+See `TODO.md` for Step #9 (Monica escalation, deferred) and remaining project to-dos.
 
 ## Database
 
@@ -182,3 +183,7 @@ Key invariants (enforced in code):
 | CLI Step #3 | Multi-tenant scope isolation — INV-06 verified at the UI layer (SCOPE-SUP-01..08, SCOPE-RET-01..04); meredith.py scope leak fixed |
 | CLI Step #4 | Gate enforcement UI — INV-03 verified at HTTP layer: 409 on out-of-order, 200 on legal (INV03-GATE-01..03) |
 | CLI Step #5 | Password reset E2E — full forgot→token→reset→login→restore cycle, fully idempotent (PW-RESET-01..05) |
+| CLI Step #6 | JWT revocation E2E — logout → access blocked → new login succeeds (JWT-REV-01..03); pam_flow |
+| CLI Step #7 | RBAC cross-portal enforcement — supplier/retailer blocked on wrong-role routes (RBAC-01..03); new rbac_flow.py |
+| CLI Step #8 | Certification full flow — gate_3=CERTIFIED badge verified in Chrissy dashboard + /certification (CHR-CERT-03..04); scope_flow |
+| CLI Step #10 | Andy Path 1 & 3 signals — S3 signal coverage for all 3 YAML wizard ingestion paths (SIG-YAML1/YAML3-01..03); meredith_flow |

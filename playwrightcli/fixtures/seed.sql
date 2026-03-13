@@ -304,6 +304,39 @@ ON CONFLICT (queue_id) DO UPDATE
 -- the 850-BEG-01 patch pending for CHR-PATCH-04 DOM checks.
 -- ---------------------------------------------------------------------------
 
+-- ===========================================================================
+-- CERTIFICATION TEST SUPPLIER (Step #8 — CHR-CERT-03/04 full-flow)
+--
+-- cert_supplier: supplier role, supplier_slug='cert_test', gate_3=CERTIFIED.
+-- Seeding this user and gate status lets scope_flow verify that the
+-- CERTIFIED badge and certification page both reflect the DB state.
+--
+-- Password (bcrypt rounds=12): certportal_cert
+-- ===========================================================================
+
+INSERT INTO portal_users (username, hashed_password, role, retailer_slug, supplier_slug)
+VALUES (
+    'cert_supplier',
+    '$2b$12$s/9Vxie25QYAyS/kipcTauZUalHs4ubVI6ARkZYi7wNWjwbGpPsRK',
+    'supplier',
+    'lowes',
+    'cert_test'
+)
+ON CONFLICT (username) DO UPDATE
+    SET hashed_password = '$2b$12$s/9Vxie25QYAyS/kipcTauZUalHs4ubVI6ARkZYi7wNWjwbGpPsRK',
+        role            = 'supplier',
+        retailer_slug   = 'lowes',
+        supplier_slug   = 'cert_test',
+        is_active       = TRUE;
+
+INSERT INTO hitl_gate_status (supplier_id, gate_1, gate_2, gate_3, last_updated_by)
+VALUES ('cert_test', 'CERTIFIED', 'CERTIFIED', 'CERTIFIED', 'seed')
+ON CONFLICT (supplier_id) DO UPDATE
+    SET gate_1          = 'CERTIFIED',
+        gate_2          = 'CERTIFIED',
+        gate_3          = 'CERTIFIED',
+        last_updated_by = 'seed';
+
 DELETE FROM patch_suggestions
 WHERE supplier_slug = 'acme' AND error_code = 'SIG-TEST-01';
 

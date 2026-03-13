@@ -556,6 +556,42 @@ class RequirementsVerifier:
                       has_cert_info)
 
     # ------------------------------------------------------------------
+    # Certification full-flow verification (Step #8)
+    # Called directly from scope_flow.py cert steps — not via verify() dispatch.
+    # ------------------------------------------------------------------
+
+    async def verify_cert_dashboard(self, page) -> None:
+        """CHR-CERT-03: Dashboard shows CERTIFIED badge for cert_test supplier."""
+        body_text = (await page.text_content("body") or "").lower()
+        # chrissy_home.html renders "🎉 You're Certified!" and <div class="cert-badge">
+        has_badge = (
+            "certified" in body_text
+            or "cert-badge" in (await page.content()).lower()
+            or "edi certified" in body_text
+        )
+        self._record(
+            "CHR-CERT-03",
+            "Dashboard shows CERTIFIED badge for cert_test supplier",
+            has_badge,
+            "cert-badge element and/or 'certified' text found" if has_badge else "No certified badge visible",
+        )
+
+    async def verify_cert_certification_page(self, page) -> None:
+        """CHR-CERT-04: /certification page shows certified status."""
+        body_text = (await page.text_content("body") or "").lower()
+        # chrissy_home.html renders "Certified" gate-status-badge and "EDI Certified" inside cert-badge
+        has_certified_status = (
+            "certified" in body_text
+            or "edi certified" in body_text
+        )
+        self._record(
+            "CHR-CERT-04",
+            "/certification page shows certified status for cert_test supplier",
+            has_certified_status,
+            "'certified' status text found" if has_certified_status else "No certified status visible",
+        )
+
+    # ------------------------------------------------------------------
     # Scope isolation verification (Step #3)
     # Called directly from scope_flow.py — not via verify() dispatch.
     # ------------------------------------------------------------------
@@ -733,6 +769,64 @@ class RequirementsVerifier:
         )
 
     # ------------------------------------------------------------------
+    # RBAC cross-portal enforcement verification (Step #7)
+    # Called directly from rbac_flow — not via verify() dispatch.
+    # ------------------------------------------------------------------
+
+    def verify_rbac(
+        self,
+        *,
+        req_id: str,
+        description: str,
+        access_blocked: bool,
+    ) -> None:
+        """RBAC-*: wrong-role access to protected route is blocked (redirect to /login).
+
+        Args:
+            req_id:        Requirement ID (RBAC-01 / RBAC-02 / RBAC-03).
+            description:   Human-readable description for the report.
+            access_blocked: Protected route redirected to /login (correct) or
+                            was blocked at login for wrong-role user.
+        """
+        self._record(req_id, description, access_blocked,
+                     "Blocked (correct)" if access_blocked else "LEAKED — route accessible to wrong role")
+
+    # ------------------------------------------------------------------
+    # JWT revocation verification (Step #6)
+    # Called directly from pam_flow jwt-revocation step.
+    # ------------------------------------------------------------------
+
+    def verify_jwt_revocation(
+        self,
+        *,
+        logout_redirected: bool,
+        access_blocked: bool,
+        relogin_ok: bool,
+    ) -> None:
+        """JWT-REV-*: logout → access blocked → fresh login succeeds.
+
+        Args:
+            logout_redirected: POST /logout caused browser to land on /login.
+            access_blocked:    Navigating to a protected route after logout lands on /login.
+            relogin_ok:        A fresh login after logout succeeds (not at /login).
+        """
+        self._record(
+            "JWT-REV-01",
+            "POST /logout redirects browser to /login",
+            logout_redirected,
+        )
+        self._record(
+            "JWT-REV-02",
+            "Protected route inaccessible after logout (redirects to /login)",
+            access_blocked,
+        )
+        self._record(
+            "JWT-REV-03",
+            "Fresh login after logout succeeds (lands away from /login)",
+            relogin_ok,
+        )
+
+    # ------------------------------------------------------------------
     # Signal integration verification (Step #2)
     # Called directly from flow signal steps — not via verify() dispatch.
     # ------------------------------------------------------------------
@@ -782,6 +876,92 @@ class RequirementsVerifier:
             )
         else:
             self._skip("SIG-YAML2-03", "Signal payload has type=andy_yaml_path2 and retailer_slug=lowes", "No signal found")
+
+    async def verify_signals_yaml_path1(
+        self,
+        ts: float,
+        response: dict,
+    ) -> None:
+        """SIG-YAML1-*: YAML Wizard Path 1 POST + S3 andy_path1_trigger signal."""
+        sc = self.signal_checker
+
+        http_ok = response.get("ok", False) and response.get("status") == 200
+        self._record(
+            "SIG-YAML1-01",
+            "YAML Wizard Path 1 POST returns HTTP 200",
+            http_ok,
+            f"HTTP {response.get('status', '?')}",
+        )
+
+        if sc is None:
+            self._skip("SIG-YAML1-02", "andy_path1_trigger_*.json signal written to S3", "S3 checker unavailable")
+            self._skip("SIG-YAML1-03", "Signal payload has type=andy_yaml_path1 and retailer_slug", "S3 checker unavailable")
+            return
+
+        signals = sc.list_signals_since("lowes/system/signals/andy_path1_trigger_", ts)
+        has_signal = len(signals) > 0
+        self._record(
+            "SIG-YAML1-02",
+            "andy_path1_trigger_*.json signal written to S3",
+            has_signal,
+            f"Found {len(signals)} signal(s) in lowes/system/signals/",
+        )
+
+        if has_signal:
+            payload = sc.get_object_json(signals[0]["Key"]) or {}
+            correct_type = payload.get("type") == "andy_yaml_path1"
+            correct_retailer = payload.get("retailer_slug") == "lowes"
+            self._record(
+                "SIG-YAML1-03",
+                "Signal payload has type=andy_yaml_path1 and retailer_slug=lowes",
+                correct_type and correct_retailer,
+                f"type={payload.get('type')!r} retailer_slug={payload.get('retailer_slug')!r}",
+            )
+        else:
+            self._skip("SIG-YAML1-03", "Signal payload has type=andy_yaml_path1 and retailer_slug=lowes", "No signal found")
+
+    async def verify_signals_yaml_path3(
+        self,
+        ts: float,
+        response: dict,
+    ) -> None:
+        """SIG-YAML3-*: YAML Wizard Path 3 POST + S3 andy_path3_trigger signal."""
+        sc = self.signal_checker
+
+        http_ok = response.get("ok", False) and response.get("status") == 200
+        self._record(
+            "SIG-YAML3-01",
+            "YAML Wizard Path 3 POST returns HTTP 200",
+            http_ok,
+            f"HTTP {response.get('status', '?')}",
+        )
+
+        if sc is None:
+            self._skip("SIG-YAML3-02", "andy_path3_trigger_*.json signal written to S3", "S3 checker unavailable")
+            self._skip("SIG-YAML3-03", "Signal payload has type=andy_yaml_path3 and retailer_slug", "S3 checker unavailable")
+            return
+
+        signals = sc.list_signals_since("lowes/system/signals/andy_path3_trigger_", ts)
+        has_signal = len(signals) > 0
+        self._record(
+            "SIG-YAML3-02",
+            "andy_path3_trigger_*.json signal written to S3",
+            has_signal,
+            f"Found {len(signals)} signal(s) in lowes/system/signals/",
+        )
+
+        if has_signal:
+            payload = sc.get_object_json(signals[0]["Key"]) or {}
+            correct_type = payload.get("type") == "andy_yaml_path3"
+            correct_retailer = payload.get("retailer_slug") == "lowes"
+            self._record(
+                "SIG-YAML3-03",
+                "Signal payload has type=andy_yaml_path3 and retailer_slug=lowes",
+                correct_type and correct_retailer,
+                f"type={payload.get('type')!r} retailer_slug={payload.get('retailer_slug')!r}",
+            )
+        else:
+            self._skip("SIG-YAML3-03", "Signal payload has type=andy_yaml_path3 and retailer_slug=lowes", "No signal found")
 
     async def verify_signals_patch_applied(
         self,

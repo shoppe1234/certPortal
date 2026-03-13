@@ -6,6 +6,9 @@ Steps:
   pam::suppliers           GET /suppliers
   pam::hitl-queue          GET /hitl-queue
   pam::hitl-approve-signal POST /hitl-queue/seed-hitl-sig-001/approve → verify S3 kelly signal
+  pam::gate-enforcement    POST gate/2/complete (blocked) + gate/1/complete (legal) → verify INV-03
+  pam::password-reset      Full forgot→token→reset→login→restore cycle (Step #5)
+  pam::jwt-revocation      Logout → access blocked → new login succeeds (Step #6)
   pam::monica-memory       GET /monica-memory
   pam::logout              POST /logout → assert redirect to /login
 """
@@ -29,6 +32,7 @@ PAM_STEPS = [
     "hitl-approve-signal",
     "gate-enforcement",
     "password-reset",
+    "jwt-revocation",
     "monica-memory",
     "logout",
 ]
@@ -65,6 +69,7 @@ class PamFlow(BaseFlow):
         await r.run_step(f"{pfx}hitl-approve-signal", self._hitl_approve_signal, page=p, relogin_fn=self.relogin)
         await r.run_step(f"{pfx}gate-enforcement",   self._gate_enforcement,    page=p, relogin_fn=self.relogin)
         await r.run_step(f"{pfx}password-reset",     self._password_reset,      page=p, relogin_fn=self.relogin)
+        await r.run_step(f"{pfx}jwt-revocation",     self._jwt_revocation,      page=p, relogin_fn=self.relogin)
         await r.run_step(f"{pfx}monica-memory",      self._monica_memory,       page=p, relogin_fn=self.relogin)
         await self.capture("monica-memory")
         await self.verify("monica-memory")
@@ -273,6 +278,54 @@ class PamFlow(BaseFlow):
 
         # Return to pam_admin session so downstream steps work
         await self.relogin()
+
+    async def _jwt_revocation(self) -> None:
+        """Verify JWT revocation: logout → access blocked → new login succeeds (Step #6).
+
+        Does NOT rely on reading httpOnly cookies. Instead tests the observable
+        browser behaviour: after /logout, protected routes redirect to /login;
+        a fresh login then succeeds.
+
+        JWT-REV-01: POST /logout redirects browser to /login.
+        JWT-REV-02: Navigating to a protected route after logout redirects to /login.
+        JWT-REV-03: A fresh login after logout succeeds (not at /login).
+        """
+        if self._verifier is None:
+            return
+
+        # --- JWT-REV-01: POST /logout → redirect to /login ---
+        await self.goto("/suppliers")   # confirm we're authenticated first
+        await self.page.evaluate("""() => {
+            const f = document.createElement('form');
+            f.method = 'POST';
+            f.action = '/logout';
+            document.body.appendChild(f);
+            f.submit();
+        }""")
+        await self.page.wait_for_url("**/login**", timeout=10_000)
+        logout_redirected = "/login" in self.page.url
+
+        # --- JWT-REV-02: navigate to protected route without session → /login ---
+        await self.page.goto(
+            f"{self.base_url}/suppliers",
+            wait_until="domcontentloaded",
+        )
+        access_blocked = "/login" in self.page.url
+
+        # --- JWT-REV-03: new login succeeds ---
+        await self.page.fill('input[name="username"]', self.username)
+        await self.page.fill('input[name="password"]', self.password)
+        async with self.page.expect_navigation(timeout=10_000):
+            await self.page.click('button[type="submit"]')
+        relogin_ok = "/login" not in self.page.url
+        if relogin_ok:
+            self._logged_in = True
+
+        self._verifier.verify_jwt_revocation(
+            logout_redirected=logout_redirected,
+            access_blocked=access_blocked,
+            relogin_ok=relogin_ok,
+        )
 
     async def _monica_memory(self) -> None:
         await self.goto("/monica-memory")

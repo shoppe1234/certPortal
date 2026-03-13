@@ -1,4 +1,4 @@
-# certPortal — Architectural Decision Record (Sprint 1–6 + playwrightcli Steps #1–5)
+# certPortal — Architectural Decision Record (Sprint 1–6 + playwrightcli Steps #1–8, #10)
 
 Decisions made during Sprints 1–6 and the playwrightcli hardening work that were not
 explicitly covered by the build prompt.
@@ -871,3 +871,103 @@ read S3 credentials from `.env` the same way.
 - `playwrightcli/flows/scope_flow.py`: standalone class (does not extend BaseFlow, does not
   import PORTALS config indirectly from certportal).
 - Future playwrightcli fixtures must follow the same pattern.
+
+
+---
+
+## ADR-028: JWT Revocation E2E — Browser Navigation Approach (Step #6)
+
+### Context
+
+Step #6 tests that a revoked JWT cannot be used to access protected routes. The TODO.md
+spec called for capturing the httpOnly `access_token` cookie via `page.evaluate`, but httpOnly
+cookies are not accessible to JavaScript. An API bearer token approach via `/token/api` would
+require a separate token-revoke endpoint (the existing `/logout` only reads from cookies).
+
+### Decision
+
+Test the observable browser behavior: POST /logout via form submit, then navigate to a protected
+route, assert the URL lands at /login. This tests the user-facing outcome without requiring
+cookie introspection. The JWT revocation mechanics (JTI stored in revoked_tokens, checked by
+`get_current_user`) are already covered by Suite A unit tests. The UI test validates that the
+portal correctly blocks access post-logout, which is the user-visible guarantee.
+
+### Consequences
+
+- JWT-REV-01..03 verify: logout → protected route blocked → new login succeeds.
+- `pam_flow._jwt_revocation()` posts logout via JS form, navigates /suppliers, re-logs in.
+- Step re-establishes pam_admin session by filling and submitting the login form directly.
+
+---
+
+## ADR-029: RBAC Cross-Portal — Actual Role Rules Used (Step #7)
+
+### Context
+
+TODO.md proposed testing "admin rejected on Chrissy". However, Chrissy's router uses
+`require_role("admin", "supplier")` — admin IS a valid role on Chrissy. The proposed test
+would pass for the wrong reason (admin happens to be allowed).
+
+### Decision
+
+Use three test scenarios that align with the actual portal role rules:
+- PAM (`admin` only): acme_supplier (supplier) → blocked ✓
+- Chrissy (`admin` or `supplier`): lowes_retailer (retailer) → blocked ✓
+- Meredith (`admin` or `retailer`): acme_supplier (supplier) → blocked ✓
+
+This tests real role enforcement. A new standalone `rbac_flow.py` handles all three cases.
+
+### Consequences
+
+- RBAC-01: supplier → PAM /suppliers → redirected to /login
+- RBAC-02: retailer → Chrissy /patches → redirected to /login
+- RBAC-03: supplier → Meredith /supplier-status → redirected to /login
+- No new seed data required (existing dev users cover all cases).
+
+---
+
+## ADR-030: Certification Full Flow — Scoped to scope_flow.py (Step #8)
+
+### Context
+
+The cert test requires logging in as a different supplier (cert_supplier, supplier_slug=cert_test)
+than the one used in chrissy_flow.py (acme_supplier). Adding it to chrissy_flow.py would
+require disruptive mid-flow user switching. scope_flow.py already handles standalone per-step
+login/logout for multiple users.
+
+### Decision
+
+Add cert steps to scope_flow.py alongside the existing tenant isolation steps. The cert
+steps follow the same login→navigate→verify→logout pattern. Seed adds `cert_supplier` user
+and `hitl_gate_status` row for cert_test with gate_3=CERTIFIED.
+
+### Consequences
+
+- scope_flow.py now serves two purposes: INV-06 tenant isolation + CHR-CERT-03/04 certification.
+- CHR-CERT-03/04 verify the CERTIFIED badge on the dashboard and /certification page.
+- seed.sql adds cert_supplier (bcrypt hash for certportal_cert) + hitl_gate_status for cert_test.
+
+---
+
+## ADR-031: Andy Path 1 & 3 Signals — Mirror Path 2 Pattern (Step #10)
+
+### Context
+
+meredith_flow.py already covered YAML Wizard Path 2 (SIG-YAML2-*). Paths 1 and 3 have
+identical portal-side structure: POST endpoint reads `retailer_slug` from body/JWT, writes a
+signal JSON to S3 under `lowes/system/signals/andy_pathN_trigger_{ts}.json`.
+
+### Decision
+
+Add two new steps to meredith_flow.py mirroring the existing path2 step exactly. The body
+differs per path:
+- Path 1: `{retailer_slug, pdf_key}` (triggers PDF extraction via Dwight)
+- Path 3: `{retailer_slug, bundle, segment_overrides}` (triggers wizard form serialization)
+
+S3 verification follows the same three-check pattern (HTTP 200 / signal exists / payload correct).
+
+### Consequences
+
+- SIG-YAML1-01..03 and SIG-YAML3-01..03: 6 new requirement checks.
+- S3 checks degrade to SKIP when SignalChecker is unavailable (same as SIG-YAML2-*).
+- MEREDITH_STEPS extended with yaml-wizard-path1-signal and yaml-wizard-path3-signal.

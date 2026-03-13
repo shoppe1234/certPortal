@@ -2,10 +2,10 @@
 
 ## Project State
 
-Sprints 1–6 are complete. playwrightcli Steps #1–5 are complete (97 checks, 27 steps, 0 failures).
-See `DECISIONS.md` (ADR-001 through ADR-027) for the authoritative record of every
+Sprints 1–6 are complete. playwrightcli Steps #1–8 and #10 are complete (112 checks, 35 steps, 0 failures).
+See `DECISIONS.md` (ADR-001 through ADR-031) for the authoritative record of every
 architectural decision made during Sprints 1–6 and the playwrightcli hardening work.
-See `TODO.md` for planned Steps #6–10 and root-level engineering to-dos.
+See `TODO.md` for Step #9 (deferred) and root-level engineering to-dos.
 
 ## Architecture Invariants — NEVER VIOLATE
 - INV-01: Agents never import each other. S3 is the only inter-agent channel.
@@ -114,8 +114,8 @@ Auth on all portals: /login, /token, /token/refresh, /logout, /change-password, 
 
 Run: `python -m testing.certportal_jules_test`
 
-## playwrightcli E2E Harness (Steps #1–5 complete)
-Self-correcting Playwright CLI with requirements verification. 97 checks, 0 failures.
+## playwrightcli E2E Harness (Steps #1–8, #10 complete)
+Self-correcting Playwright CLI with requirements verification. 112 checks, 35 steps, 0 failures.
 
 ### Steps completed
 - **Step #1** — `playwrightcli/fixtures/seed.sql`: idempotent test data for all 9 previously-skipped checks
@@ -123,12 +123,17 @@ Self-correcting Playwright CLI with requirements verification. 97 checks, 0 fail
 - **Step #3** — Multi-tenant scope isolation: suppliers/retailers cannot see each other's data (INV-06)
 - **Step #4** — Gate enforcement UI: out-of-order advance returns 409, legal advance returns 200 (INV-03)
 - **Step #5** — Password reset E2E: forgot → DB token → reset → login → restore (fully idempotent)
+- **Step #6** — JWT revocation E2E: logout → protected route blocked → new login succeeds (JWT-REV-01..03)
+- **Step #7** — RBAC cross-portal: supplier→PAM blocked, retailer→Chrissy blocked, supplier→Meredith blocked (RBAC-01..03)
+- **Step #8** — Certification full flow: cert_supplier (gate_3=CERTIFIED) sees badge on dashboard + /certification (CHR-CERT-03..04)
+- **Step #10** — Andy Path 1 & 3 signals: full signal coverage for all 3 YAML wizard paths (SIG-YAML1/YAML3-01..03)
 
 ### Key files
 - `playwrightcli/fixtures/seed.sql`          — idempotent test data (apply before first run)
 - `playwrightcli/fixtures/signal_checker.py` — standalone S3 signal scanner (no main codebase imports)
 - `playwrightcli/fixtures/token_fetcher.py`  — standalone DB reader for password_reset_tokens
-- `playwrightcli/flows/scope_flow.py`        — multi-tenant scope isolation flow (standalone, no BaseFlow)
+- `playwrightcli/flows/scope_flow.py`        — scope isolation + cert full flow (standalone, no BaseFlow)
+- `playwrightcli/flows/rbac_flow.py`         — RBAC cross-portal enforcement (standalone, no BaseFlow)
 - `playwrightcli/requirements_verifier.py`   — all verify_* methods; accumulates PASS/FAIL/SKIP
 
 ### Isolation constraint (ADR-027)

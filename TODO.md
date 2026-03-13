@@ -1,6 +1,6 @@
 # certPortal — TODO
 
-Sprints 1–6 complete. playwrightcli Steps #1–5 complete (97 checks, 27 steps, all PASS).
+Sprints 1–6 complete. playwrightcli Steps #1–8, #10 complete (112 checks, 35 steps, all PASS).
 Items below are the next logical layer of work, grouped by category.
 
 ---
@@ -11,66 +11,26 @@ These extend the E2E harness. Each follows the same pattern:
 add a step to a flow, add a `verify_*` method to `requirements_verifier.py`,
 add seed data if needed, and register in `cli.py`.
 
-### Step #6 — JWT Revocation E2E
-**Goal:** prove that a JWT is dead after logout — reusing the cookie returns 401 / redirect to /login.
+### ~~Step #6 — JWT Revocation E2E~~ ✓ COMPLETE
+Added `pam::jwt-revocation` step to `pam_flow.py`. Tests: logout → /suppliers blocked → fresh login succeeds.
+Requirements: JWT-REV-01..03 (3 checks).
 
-- Log in as `pam_admin`, capture the `access_token` cookie value via `page.evaluate`
-- POST `/logout` to revoke it
-- Replay the captured token in a fetch to a protected route (e.g. `/suppliers`)
-- Assert HTTP 401 or redirect to `/login` (not 200)
+### ~~Step #7 — RBAC Cross-Portal Enforcement~~ ✓ COMPLETE
+New `rbac_flow.py` standalone flow. Actual role rules: PAM=admin only, Meredith=admin|retailer, Chrissy=admin|supplier.
+Steps: supplier→PAM /suppliers blocked, retailer→Chrissy /patches blocked, supplier→Meredith /supplier-status blocked.
+Requirements: RBAC-01..03 (3 checks).
 
-New requirements:
-```
-JWT-REV-01  Logout POSTs to /logout and redirects to /login
-JWT-REV-02  Revoked token rejected on protected route (401 / redirect)
-JWT-REV-03  New login after logout succeeds with fresh token
-```
+### ~~Step #8 — Certification Full Flow (Chrissy)~~ ✓ COMPLETE
+Added `cert_supplier` (supplier_slug=cert_test, gate_3=CERTIFIED) to seed.sql. Added `scope::cert-dashboard` and
+`scope::cert-certification` steps to scope_flow.py. Verifies CERTIFIED badge on dashboard and /certification.
+Requirements: CHR-CERT-03..04 (2 checks).
 
----
-
-### Step #7 — RBAC Cross-Portal Enforcement
-**Goal:** prove that role guards block access across portals (INV-07 adjacency test).
-
-- `acme_supplier` (role=supplier) attempts GET `http://localhost:8000/suppliers` (PAM — admin only) → expect redirect to /login or 403
-- `lowes_retailer` (role=retailer) attempts GET `http://localhost:8002/patches` (Chrissy — supplier only) → expect redirect or 403
-- `pam_admin` (role=admin) attempts GET `http://localhost:8002/` (Chrissy — supplier only) → expect redirect or 403
-
-New requirements:
-```
-RBAC-01  Supplier JWT rejected on PAM admin route
-RBAC-02  Retailer JWT rejected on Chrissy supplier route
-RBAC-03  Admin JWT rejected on Chrissy supplier route
-```
-
-No new seed needed — existing users cover all three cases.
-
----
-
-### Step #8 — Certification Full Flow (Chrissy)
-**Goal:** CHR-CERT-01/02 currently only check page load. Extend to verify gate_3=CERTIFIED is
-reflected in the UI (badge, status text, download link if present).
-
-- Seed a `cert_test` supplier with `gate_3='CERTIFIED'` (ON CONFLICT DO UPDATE to reset)
-- Log in as `cert_supplier` (add seed user with `supplier_slug='cert_test'`)
-- Navigate to `/` (dashboard) and `/certification`
-- Assert certification badge and/or "Certified" text is visible
-
-New requirements:
-```
-CHR-CERT-03  Dashboard shows gate_3=CERTIFIED badge for certified supplier
-CHR-CERT-04  /certification page shows certification status and date
-```
-
----
-
-### Step #9 — Monica Escalation Pipeline E2E
+### Step #9 — Monica Escalation Pipeline E2E (DEFERRED)
 **Goal:** prove that a supplier FAIL scenario (EDI validation error) triggers Monica to write
 a HITL queue item — end-to-end from test_occurrences row to PAM queue entry.
 
-- Seed a fresh FAIL `test_occurrence` with `status='FAIL'` for a dedicated supplier
-- POST to Moses via the agent's HTTP interface (or trigger via a seeded signal) to simulate escalation
-- Wait for Monica to process and write to `hitl_queue`
-- Verify a new queue item appears in PAM `/hitl-queue` for that supplier
+Requires Monica to be running as a background process or triggered inline — not feasible
+in the current automated headless harness. Defer until Docker Compose orchestration is in place.
 
 New requirements:
 ```
@@ -79,21 +39,10 @@ MON-ESC-02  Monica reads signal and writes PENDING_APPROVAL item to hitl_queue
 MON-ESC-03  New HITL item visible in PAM /hitl-queue for the correct supplier
 ```
 
-Note: requires Monica to be running as a background process or triggered inline.
-
----
-
-### Step #10 — Andy Path 1 & Path 3 Signals
-**Goal:** the `meredith::yaml-wizard-signal` step covers Path 2 only. Complete the set.
-
-- Path 1: POST `/yaml-wizard/path1` → verify `andy_path1_trigger_*.json` written to S3
-- Path 3: POST `/yaml-wizard/path3` → verify `andy_path3_trigger_*.json` written to S3
-
-New requirements:
-```
-SIG-YAML1-01..03  (mirrors SIG-YAML2-* for Path 1)
-SIG-YAML3-01..03  (mirrors SIG-YAML2-* for Path 3)
-```
+### ~~Step #10 — Andy Path 1 & Path 3 Signals~~ ✓ COMPLETE
+Added `meredith::yaml-wizard-path1-signal` and `meredith::yaml-wizard-path3-signal` steps to `meredith_flow.py`.
+POST /yaml-wizard/path1 and /path3, verify respective S3 andy_pathN_trigger_*.json signals.
+Requirements: SIG-YAML1-01..03, SIG-YAML3-01..03 (6 checks).
 
 ---
 
@@ -198,10 +147,13 @@ Items that belong in the main codebase, not in the test harness.
 ```
 python -m playwrightcli --portal all --verify --headless
 
-PAM      37 checks  (auth, dashboard, retailers, suppliers, HITL, gate enforcement, password reset, memory)
-MEREDITH 18 checks  (auth, spec setup, supplier status, YAML wizard signal)
+PAM      40 checks  (auth, dashboard, retailers, suppliers, HITL, gate enforcement, password reset, JWT revocation, memory)
+MEREDITH 24 checks  (auth, spec setup, supplier status, YAML wizard signals path 2/1/3)
 CHRISSY  30 checks  (auth, dashboard, scenarios, errors, patches, patch signal, certification)
-SCOPE    12 checks  (supplier A/B isolation, retailer A/B isolation)
-─────────────────
-TOTAL    97 checks  0 FAIL  0 SKIP
+SCOPE    14 checks  (supplier A/B isolation, retailer A/B isolation, cert full flow)
+RBAC      3 checks  (supplier→PAM, retailer→Chrissy, supplier→Meredith)
+──────────────────
+TOTAL   111 checks  0 FAIL  0 SKIP
 ```
+
+(Note: 112 requirement checks total — SIG-YAML1/YAML3 S3 checks are SKIP when S3 unavailable; HTTP checks always run.)

@@ -1,11 +1,13 @@
 """meredith_flow.py — Retailer portal (port 8001) E2E steps.
 
 Steps:
-  meredith::login              GET /login → fill form → POST /token → assert /
-  meredith::spec-setup         GET /spec-setup
-  meredith::supplier-status    GET /supplier-status
-  meredith::yaml-wizard-signal POST /yaml-wizard/path2 → verify S3 andy_path2_trigger signal
-  meredith::logout             POST /logout → assert /login
+  meredith::login                    GET /login → fill form → POST /token → assert /
+  meredith::spec-setup               GET /spec-setup
+  meredith::supplier-status          GET /supplier-status
+  meredith::yaml-wizard-signal       POST /yaml-wizard/path2 → verify S3 andy_path2_trigger signal
+  meredith::yaml-wizard-path1-signal POST /yaml-wizard/path1 → verify S3 andy_path1_trigger signal
+  meredith::yaml-wizard-path3-signal POST /yaml-wizard/path3 → verify S3 andy_path3_trigger signal
+  meredith::logout                   POST /logout → assert /login
 """
 from __future__ import annotations
 
@@ -21,6 +23,8 @@ MEREDITH_STEPS = [
     "spec-setup",
     "supplier-status",
     "yaml-wizard-signal",
+    "yaml-wizard-path1-signal",
+    "yaml-wizard-path3-signal",
     "logout",
 ]
 
@@ -49,8 +53,10 @@ class MeredithFlow(BaseFlow):
         await r.run_step(f"{pfx}supplier-status",    self._supplier_status,    page=p, relogin_fn=self.relogin)
         await self.capture("supplier-status")
         await self.verify("supplier-status")
-        await r.run_step(f"{pfx}yaml-wizard-signal", self._yaml_wizard_signal, page=p, relogin_fn=self.relogin)
-        await r.run_step(f"{pfx}logout",             self.logout,              max_retries=2, page=p)
+        await r.run_step(f"{pfx}yaml-wizard-signal",        self._yaml_wizard_signal,        page=p, relogin_fn=self.relogin)
+        await r.run_step(f"{pfx}yaml-wizard-path1-signal",  self._yaml_wizard_path1_signal,  page=p, relogin_fn=self.relogin)
+        await r.run_step(f"{pfx}yaml-wizard-path3-signal",  self._yaml_wizard_path3_signal,  page=p, relogin_fn=self.relogin)
+        await r.run_step(f"{pfx}logout",                    self.logout,                     max_retries=2, page=p)
 
     # ------------------------------------------------------------------
     # Step implementations
@@ -109,3 +115,72 @@ class MeredithFlow(BaseFlow):
         }""")
 
         await self._verifier.verify_signals_yaml_path2(ts, response)
+
+    async def _yaml_wizard_path1_signal(self) -> None:
+        """POST /yaml-wizard/path1 via browser fetch, verify S3 andy_path1_trigger signal.
+
+        SIG-YAML1-01: HTTP 200 returned.
+        SIG-YAML1-02: andy_path1_trigger_*.json written under lowes/system/signals/.
+        SIG-YAML1-03: Payload contains type=andy_yaml_path1 and retailer_slug=lowes.
+        """
+        if self._verifier is None:
+            return
+
+        await self.goto("/yaml-wizard")
+        await self.assert_page_ok()
+
+        ts = time.time() - 1
+
+        response = await self.page.evaluate("""async () => {
+            try {
+                const r = await fetch('/yaml-wizard/path1', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        retailer_slug: 'lowes',
+                        pdf_key: 'lowes/system/test_spec.pdf'
+                    })
+                });
+                const body = await r.json();
+                return {ok: r.ok, status: r.status, body: body};
+            } catch (e) {
+                return {ok: false, status: 0, body: {}, error: String(e)};
+            }
+        }""")
+
+        await self._verifier.verify_signals_yaml_path1(ts, response)
+
+    async def _yaml_wizard_path3_signal(self) -> None:
+        """POST /yaml-wizard/path3 via browser fetch, verify S3 andy_path3_trigger signal.
+
+        SIG-YAML3-01: HTTP 200 returned.
+        SIG-YAML3-02: andy_path3_trigger_*.json written under lowes/system/signals/.
+        SIG-YAML3-03: Payload contains type=andy_yaml_path3 and retailer_slug=lowes.
+        """
+        if self._verifier is None:
+            return
+
+        await self.goto("/yaml-wizard")
+        await self.assert_page_ok()
+
+        ts = time.time() - 1
+
+        response = await self.page.evaluate("""async () => {
+            try {
+                const r = await fetch('/yaml-wizard/path3', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        retailer_slug: 'lowes',
+                        bundle: 'general_merchandise',
+                        segment_overrides: {}
+                    })
+                });
+                const body = await r.json();
+                return {ok: r.ok, status: r.status, body: body};
+            } catch (e) {
+                return {ok: false, status: 0, body: {}, error: String(e)};
+            }
+        }""")
+
+        await self._verifier.verify_signals_yaml_path3(ts, response)

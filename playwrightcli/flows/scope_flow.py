@@ -1,10 +1,13 @@
-"""scope_flow.py — Multi-tenant scope isolation verification (Step #3).
+"""scope_flow.py — Multi-tenant scope isolation + certification full-flow (Steps #3 and #8).
 
 Verifies INV-06: data is scoped to {retailer_slug}/{supplier_slug}/ at the
 portal level. Logs in as four different users across two tenants and asserts
 that each user sees only their own tenant's data.
 
-Tenants under test:
+Also verifies Step #8 (certification full flow): cert_supplier (supplier_slug='cert_test',
+gate_3=CERTIFIED) should see the CERTIFIED badge on both the dashboard and /certification.
+
+Tenants under test (scope steps):
   Tenant A (lowes):   lowes_retailer / acme_supplier
   Tenant B (target):  target_retailer / rival_supplier
 
@@ -15,12 +18,16 @@ Steps (each handles its own login/logout):
   scope::supplier-b-scenarios  rival sees tx-type 855, NOT retailer 'lowes'
   scope::retailer-a-status     lowes sees 'acme', NOT 'rival'
   scope::retailer-b-status     target sees 'rival', NOT 'acme'
+  scope::cert-dashboard        cert_supplier sees CERTIFIED badge on /
+  scope::cert-certification    cert_supplier sees certified status on /certification
 
 Requirements verified:
   SCOPE-SUP-01 / SCOPE-SUP-02  acme supplier isolation (/patches + /scenarios)
   SCOPE-SUP-03 / SCOPE-SUP-04  rival supplier isolation (/patches + /scenarios)
   SCOPE-RET-01 / SCOPE-RET-02  lowes retailer isolation (/supplier-status)
   SCOPE-RET-03 / SCOPE-RET-04  target retailer isolation (/supplier-status)
+  CHR-CERT-03                  Dashboard shows CERTIFIED badge for cert_test supplier
+  CHR-CERT-04                  /certification page shows certified status
 """
 from __future__ import annotations
 
@@ -35,6 +42,8 @@ SCOPE_STEPS = [
     "supplier-b-scenarios",
     "retailer-a-status",
     "retailer-b-status",
+    "cert-dashboard",
+    "cert-certification",
 ]
 
 # Tenant A
@@ -46,6 +55,7 @@ _USERS = {
     "rival_supplier":  {"password": "certportal_rival",     "url": _CHRISSY_URL},
     "lowes_retailer":  {"password": "certportal_retailer",  "url": _MEREDITH_URL},
     "target_retailer": {"password": "certportal_target",    "url": _MEREDITH_URL},
+    "cert_supplier":   {"password": "certportal_cert",      "url": _CHRISSY_URL},
 }
 
 
@@ -70,6 +80,8 @@ class ScopeFlow:
         await r.run_step("scope::supplier-b-scenarios", self._supplier_b_scenarios, page=self.page)
         await r.run_step("scope::retailer-a-status",    self._retailer_a_status,    page=self.page)
         await r.run_step("scope::retailer-b-status",    self._retailer_b_status,    page=self.page)
+        await r.run_step("scope::cert-dashboard",       self._cert_dashboard,       page=self.page)
+        await r.run_step("scope::cert-certification",   self._cert_certification,   page=self.page)
 
     # ------------------------------------------------------------------
     # Auth helpers
@@ -194,4 +206,24 @@ class ScopeFlow:
                 req_own="SCOPE-RET-03",
                 req_isolation="SCOPE-RET-04",
             )
+        await self._logout()
+
+    async def _cert_dashboard(self) -> None:
+        """cert_supplier /: CERTIFIED badge visible on dashboard (CHR-CERT-03).
+
+        Requires seed: cert_supplier (supplier_slug='cert_test'), hitl_gate_status
+        gate_3='CERTIFIED' for cert_test.
+        """
+        await self._login("cert_supplier")
+        await self._goto("cert_supplier", "/")
+        if self._verifier:
+            await self._verifier.verify_cert_dashboard(self.page)
+        await self._logout()
+
+    async def _cert_certification(self) -> None:
+        """cert_supplier /certification: certified status visible (CHR-CERT-04)."""
+        await self._login("cert_supplier")
+        await self._goto("cert_supplier", "/certification")
+        if self._verifier:
+            await self._verifier.verify_cert_certification_page(self.page)
         await self._logout()
