@@ -199,7 +199,7 @@ def main() -> None:
     )
     if runner.fail_count > 0:
         print(
-            "Failures logged → playwrightcli/feedback.md\n"
+            "Failures logged -> playwrightcli/feedback.md\n"
             "Run  python -m playwrightcli --consolidate  to update memory.md"
         )
     else:

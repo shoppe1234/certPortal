@@ -569,13 +569,13 @@ async def supplier_status(
     rows = await conn.fetch(
         """
         SELECT
-            h.supplier_slug,
+            h.supplier_id AS supplier_slug,
             h.gate_1, h.gate_2, h.gate_3,
             h.last_updated,
             (SELECT COUNT(*) FROM test_occurrences t
-             WHERE t.supplier_slug = h.supplier_slug AND t.status = 'PASS') AS pass_count,
+             WHERE t.supplier_slug = h.supplier_id AND t.status = 'PASS') AS pass_count,
             (SELECT COUNT(*) FROM test_occurrences t
-             WHERE t.supplier_slug = h.supplier_slug AND t.status = 'FAIL') AS fail_count
+             WHERE t.supplier_slug = h.supplier_id AND t.status = 'FAIL') AS fail_count
         FROM hitl_gate_status h
         ORDER BY h.last_updated DESC
         """
@@ -605,9 +605,9 @@ async def supplier_status_partial(
 ):
     row = await conn.fetchrow(
         """
-        SELECT supplier_slug, gate_1, gate_2, gate_3, last_updated
+        SELECT supplier_id AS supplier_slug, gate_1, gate_2, gate_3, last_updated
         FROM hitl_gate_status
-        WHERE supplier_slug = $1
+        WHERE supplier_id = $1
         """,
         supplier_id,
     )

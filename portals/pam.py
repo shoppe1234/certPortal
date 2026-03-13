@@ -381,7 +381,7 @@ async def dashboard(
         "SELECT DISTINCT retailer_slug FROM retailer_specs ORDER BY retailer_slug"
     )
     suppliers = await conn.fetch(
-        "SELECT DISTINCT supplier_slug FROM hitl_gate_status ORDER BY supplier_slug"
+        "SELECT DISTINCT supplier_id AS supplier_slug FROM hitl_gate_status ORDER BY supplier_id"
     )
     hitl_count = await conn.fetchval(
         "SELECT COUNT(*) FROM hitl_queue WHERE status = 'PENDING_APPROVAL'"
@@ -438,7 +438,7 @@ async def suppliers(
     user: dict = Depends(get_current_user),
 ):
     rows = await conn.fetch(
-        "SELECT supplier_slug, gate_1, gate_2, gate_3, last_updated, last_updated_by FROM hitl_gate_status ORDER BY last_updated DESC"
+        "SELECT supplier_id AS supplier_slug, gate_1, gate_2, gate_3, last_updated, last_updated_by FROM hitl_gate_status ORDER BY last_updated DESC"
     )
     return templates.TemplateResponse(
         "pam_suppliers.html",
