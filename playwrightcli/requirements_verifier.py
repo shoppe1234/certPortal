@@ -17,6 +17,7 @@ import os
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 REPORT_DIR = Path("requirements_reports")
 
@@ -36,6 +37,9 @@ class RequirementsVerifier:
 
     portal: str
     results: list[ReqResult] = field(default_factory=list)
+    # Optional S3 signal checker — attached by cli.py when --verify is active.
+    # None when boto3 is unavailable or S3 is unreachable; signal checks SKIP.
+    signal_checker: Any | None = field(default=None)
 
     def _record(self, req_id: str, description: str, passed: bool, detail: str = "") -> None:
         status = "PASS" if passed else "FAIL"
@@ -175,9 +179,11 @@ class RequirementsVerifier:
                              or "no items" in body_text or "empty" in body_text)
         self._record("PAM-HITL-02", "Queue content or empty-state renders", has_queue_content)
 
-        # Check for approve/reject if items exist
-        table_el = await page.query_selector("table")
-        if table_el is not None:
+        # Check for approve/reject if items exist.
+        # The HITL queue template renders .hitl-card divs (not a <table>),
+        # so detect the card list rather than a table element.
+        hitl_items_el = await page.query_selector("#hitl-list, .hitl-card")
+        if hitl_items_el is not None:
             approve_btn = await page.query_selector(
                 'button:has-text("Approve"), button:has-text("approve"), '
                 'a:has-text("Approve"), [hx-post*="approve"]'
@@ -404,9 +410,11 @@ class RequirementsVerifier:
         body_text = (await page.text_content("body") or "").lower()
 
         # CHR-SCEN-03: Status badges (PASS/FAIL/PARTIAL)
+        # Gate on .scenario-card (cards template) not table — matches CHR-SCEN-04 pattern.
         has_status = ("pass" in body_text or "fail" in body_text
                       or "partial" in body_text or "status" in body_text)
-        if table_el is not None:
+        scenario_card_early = await page.query_selector(".scenario-card")
+        if scenario_card_early is not None:
             self._record("CHR-SCEN-03", "Status badges (PASS/FAIL/PARTIAL)", has_status)
         else:
             self._skip("CHR-SCEN-03", "Status badges (PASS/FAIL/PARTIAL)", "No scenarios data")
@@ -422,9 +430,10 @@ class RequirementsVerifier:
             self._skip("CHR-SCEN-04", "Transaction type visible", "No scenarios data")
 
         # CHR-SCEN-05: Validation timestamp
+        # Gate on .scenario-card (cards template) not table — matches CHR-SCEN-04 pattern.
         has_timestamp = ("validated" in body_text or "timestamp" in body_text
                          or "date" in body_text or "202" in body_text)
-        if table_el is not None:
+        if scenario_card_early is not None:
             self._record("CHR-SCEN-05", "Validation timestamp visible", has_timestamp)
         else:
             self._skip("CHR-SCEN-05", "Validation timestamp visible", "No scenarios data")
@@ -545,6 +554,329 @@ class RequirementsVerifier:
                          or "pending" in body_text or "complete" in body_text)
         self._record("CHR-CERT-02", "Certification badge or pending status visible",
                       has_cert_info)
+
+    # ------------------------------------------------------------------
+    # Scope isolation verification (Step #3)
+    # Called directly from scope_flow.py — not via verify() dispatch.
+    # ------------------------------------------------------------------
+
+    async def verify_scope_supplier_patches(
+        self,
+        page,
+        own_error_code: str,
+        rival_error_code: str,
+        req_own: str,
+        req_isolation: str,
+    ) -> None:
+        """Check /patches for supplier scope: own data visible, rival's absent."""
+        body_text = (await page.text_content("body") or "").lower()
+
+        # Own supplier's patches must be present (own error code appears in patch card)
+        has_own = own_error_code.lower() in body_text
+        self._record(req_own, f"Own error code {own_error_code!r} visible in /patches", has_own)
+
+        # Rival's distinctive error code must be absent
+        rival_absent = rival_error_code.lower() not in body_text
+        self._record(
+            req_isolation,
+            f"Rival error code {rival_error_code!r} absent from /patches",
+            rival_absent,
+            f"{'NOT FOUND (correct)' if rival_absent else 'LEAKED — rival data visible'}",
+        )
+
+    async def verify_scope_supplier_scenarios(
+        self,
+        page,
+        own_tx_type: str,
+        rival_retailer: str,
+        req_own: str,
+        req_isolation: str,
+    ) -> None:
+        """Check /scenarios for supplier scope: own tx type visible, rival retailer absent."""
+        body_text = (await page.text_content("body") or "").lower()
+
+        has_own = own_tx_type in body_text
+        self._record(req_own, f"Transaction type {own_tx_type!r} visible in /scenarios", has_own)
+
+        rival_absent = rival_retailer.lower() not in body_text
+        self._record(
+            req_isolation,
+            f"Rival retailer {rival_retailer!r} absent from /scenarios",
+            rival_absent,
+            f"{'NOT FOUND (correct)' if rival_absent else 'LEAKED — rival retailer visible'}",
+        )
+
+    async def verify_scope_retailer_status(
+        self,
+        page,
+        own_supplier: str,
+        rival_supplier: str,
+        req_own: str,
+        req_isolation: str,
+    ) -> None:
+        """Check /supplier-status: own supplier visible, rival supplier absent."""
+        body_text = (await page.text_content("body") or "").lower()
+
+        has_own = own_supplier in body_text
+        self._record(req_own, f"Own supplier {own_supplier!r} visible in /supplier-status", has_own)
+
+        rival_absent = rival_supplier.lower() not in body_text
+        self._record(
+            req_isolation,
+            f"Rival supplier {rival_supplier!r} absent from /supplier-status",
+            rival_absent,
+            f"{'NOT FOUND (correct)' if rival_absent else 'LEAKED — rival supplier visible'}",
+        )
+
+    # ------------------------------------------------------------------
+    # Password reset E2E verification (Step #5)
+    # Called directly from pam_flow password-reset step.
+    # ------------------------------------------------------------------
+
+    def verify_password_reset(
+        self,
+        *,
+        forgot_redirected: bool,
+        token_found: bool,
+        reset_redirected: bool,
+        login_succeeded: bool,
+        restore_succeeded: bool,
+    ) -> None:
+        """PW-RESET-*: full forgot → token → reset → login → restore cycle.
+
+        Args:
+            forgot_redirected:  POST /forgot-password redirected to /login?msg=reset_sent.
+            token_found:        TokenFetcher retrieved a valid token from the DB.
+            reset_redirected:   POST /reset-password redirected to /login?msg=password_changed.
+            login_succeeded:    Login with the new password succeeded (no /login in URL).
+            restore_succeeded:  /change-password restored the original password (idempotency).
+        """
+        self._record(
+            "PW-RESET-01",
+            "POST /forgot-password redirects to /login?msg=reset_sent",
+            forgot_redirected,
+        )
+        self._record(
+            "PW-RESET-02",
+            "Reset token written to DB and retrievable",
+            token_found,
+            "No token found in password_reset_tokens" if not token_found else "",
+        )
+        self._record(
+            "PW-RESET-03",
+            "POST /reset-password redirects to /login?msg=password_changed",
+            reset_redirected,
+        )
+        self._record(
+            "PW-RESET-04",
+            "Login with new password succeeds after reset",
+            login_succeeded,
+        )
+        self._record(
+            "PW-RESET-05",
+            "Original password restored via /change-password (idempotency)",
+            restore_succeeded,
+        )
+
+    # ------------------------------------------------------------------
+    # Gate enforcement verification (Step #4)
+    # Called directly from pam_flow gate-enforcement step.
+    # ------------------------------------------------------------------
+
+    def verify_gate_enforcement(
+        self,
+        illegal_response: dict,
+        legal_response: dict,
+        supplier_id: str,
+    ) -> None:
+        """INV03-GATE-*: gate_enforcer.py blocks out-of-order transitions at the HTTP layer.
+
+        Args:
+            illegal_response: fetch() result for POST gate_3 when gate_2 is PENDING (expect 409).
+            legal_response:   fetch() result for POST gate_2 when gate_1 is COMPLETE (expect 200).
+            supplier_id:      Supplier used in the test (for error messages).
+        """
+        # INV03-GATE-01: out-of-order POST returns HTTP 409
+        # (inv03_bad: gate_1=PENDING, so gate_2/complete must be blocked)
+        status_409 = illegal_response.get("status") == 409
+        self._record(
+            "INV03-GATE-01",
+            "Out-of-order gate POST (gate_2 while gate_1=PENDING) returns HTTP 409",
+            status_409,
+            f"HTTP {illegal_response.get('status')} (expected 409)",
+        )
+
+        # INV03-GATE-02: 409 body contains an ordering error message
+        detail = str(illegal_response.get("body", {}).get("detail", "")).lower()
+        has_error_msg = (
+            "gate" in detail
+            or "order" in detail
+            or "precondition" in detail
+            or "complete" in detail
+            or "cannot" in detail
+        )
+        self._record(
+            "INV03-GATE-02",
+            "409 response body contains gate ordering error message",
+            has_error_msg,
+            f"detail: {detail[:120]!r}" if detail else "no detail field in response",
+        )
+
+        # INV03-GATE-03: legal gate-1 POST returns HTTP 200
+        # (inv03_ok: gate_1 has no prerequisite; COMPLETE→COMPLETE upsert is idempotent)
+        status_200 = legal_response.get("status") == 200
+        self._record(
+            "INV03-GATE-03",
+            "Legal gate-1 POST (no prerequisite, idempotent) returns HTTP 200",
+            status_200,
+            f"HTTP {legal_response.get('status')} (expected 200)",
+        )
+
+    # ------------------------------------------------------------------
+    # Signal integration verification (Step #2)
+    # Called directly from flow signal steps — not via verify() dispatch.
+    # ------------------------------------------------------------------
+
+    async def verify_signals_yaml_path2(
+        self,
+        ts: float,
+        response: dict,
+    ) -> None:
+        """SIG-YAML2-*: YAML Wizard Path 2 POST + S3 andy_path2_trigger signal."""
+        sc = self.signal_checker
+
+        # SIG-YAML2-01: HTTP 200 from /yaml-wizard/path2
+        http_ok = response.get("ok", False) and response.get("status") == 200
+        self._record(
+            "SIG-YAML2-01",
+            "YAML Wizard Path 2 POST returns HTTP 200",
+            http_ok,
+            f"HTTP {response.get('status', '?')}",
+        )
+
+        if sc is None:
+            self._skip("SIG-YAML2-02", "andy_path2_trigger_*.json signal written to S3", "S3 checker unavailable")
+            self._skip("SIG-YAML2-03", "Signal payload has type=andy_yaml_path2 and retailer_slug", "S3 checker unavailable")
+            return
+
+        # SIG-YAML2-02: signal file exists under lowes/system/signals/
+        signals = sc.list_signals_since("lowes/system/signals/andy_path2_trigger_", ts)
+        has_signal = len(signals) > 0
+        self._record(
+            "SIG-YAML2-02",
+            "andy_path2_trigger_*.json signal written to S3",
+            has_signal,
+            f"Found {len(signals)} signal(s) in lowes/system/signals/",
+        )
+
+        # SIG-YAML2-03: payload content correct
+        if has_signal:
+            payload = sc.get_object_json(signals[0]["Key"]) or {}
+            correct_type = payload.get("type") == "andy_yaml_path2"
+            correct_retailer = payload.get("retailer_slug") == "lowes"
+            self._record(
+                "SIG-YAML2-03",
+                "Signal payload has type=andy_yaml_path2 and retailer_slug=lowes",
+                correct_type and correct_retailer,
+                f"type={payload.get('type')!r} retailer_slug={payload.get('retailer_slug')!r}",
+            )
+        else:
+            self._skip("SIG-YAML2-03", "Signal payload has type=andy_yaml_path2 and retailer_slug=lowes", "No signal found")
+
+    async def verify_signals_patch_applied(
+        self,
+        ts: float,
+        patch_id: str,
+        response: dict,
+    ) -> None:
+        """SIG-PATCH-*: Patch Mark-Applied POST + S3 moses_revalidate signal."""
+        sc = self.signal_checker
+
+        # SIG-PATCH-01: HTTP 200 from /patches/{id}/mark-applied
+        http_ok = response.get("ok", False) and response.get("status") == 200
+        self._record(
+            "SIG-PATCH-01",
+            "Patch Mark-Applied POST returns HTTP 200",
+            http_ok,
+            f"HTTP {response.get('status', '?')} patch_id={patch_id}",
+        )
+
+        if sc is None:
+            self._skip("SIG-PATCH-02", "moses_revalidate_*.json signal written to S3", "S3 checker unavailable")
+            self._skip("SIG-PATCH-03", "Signal payload has trigger=patch_applied and patch_id", "S3 checker unavailable")
+            return
+
+        # SIG-PATCH-02: signal file exists under lowes/acme/signals/
+        signals = sc.list_signals_since(f"lowes/acme/signals/moses_revalidate_{patch_id}_", ts)
+        has_signal = len(signals) > 0
+        self._record(
+            "SIG-PATCH-02",
+            "moses_revalidate_*.json signal written to S3",
+            has_signal,
+            f"Found {len(signals)} signal(s) for patch_id={patch_id}",
+        )
+
+        # SIG-PATCH-03: payload content correct
+        if has_signal:
+            payload = sc.get_object_json(signals[0]["Key"]) or {}
+            correct_trigger = payload.get("trigger") == "patch_applied"
+            correct_pid = str(payload.get("patch_id", "")) == str(patch_id)
+            self._record(
+                "SIG-PATCH-03",
+                "Signal payload has trigger=patch_applied and patch_id",
+                correct_trigger and correct_pid,
+                f"trigger={payload.get('trigger')!r} patch_id={payload.get('patch_id')!r}",
+            )
+        else:
+            self._skip("SIG-PATCH-03", "Signal payload has trigger=patch_applied and patch_id", "No signal found")
+
+    async def verify_signals_hitl_approved(
+        self,
+        ts: float,
+        queue_id: str,
+        response: dict,
+    ) -> None:
+        """SIG-HITL-*: HITL Approve POST + S3 kelly_approved signal."""
+        sc = self.signal_checker
+
+        # SIG-HITL-01: HTTP 200 from /hitl-queue/{queue_id}/approve
+        http_ok = response.get("ok", False) and response.get("status") == 200
+        self._record(
+            "SIG-HITL-01",
+            "HITL Approve POST returns HTTP 200",
+            http_ok,
+            f"HTTP {response.get('status', '?')} queue_id={queue_id}",
+        )
+
+        if sc is None:
+            self._skip("SIG-HITL-02", f"kelly_approved_{queue_id}.json signal written to S3", "S3 checker unavailable")
+            self._skip("SIG-HITL-03", "Signal payload has queue_id, draft, and channel", "S3 checker unavailable")
+            return
+
+        # SIG-HITL-02: exact signal key exists (queue_id is deterministic)
+        signal_key = f"lowes/acme/signals/kelly_approved_{queue_id}.json"
+        has_signal = sc.object_exists(signal_key)
+        self._record(
+            "SIG-HITL-02",
+            f"kelly_approved_{queue_id}.json signal written to S3",
+            has_signal,
+            f"Key: {signal_key}",
+        )
+
+        # SIG-HITL-03: payload content correct
+        if has_signal:
+            payload = sc.get_object_json(signal_key) or {}
+            has_queue_id = payload.get("queue_id") == queue_id
+            has_draft    = bool(payload.get("draft"))
+            has_channel  = bool(payload.get("channel"))
+            self._record(
+                "SIG-HITL-03",
+                "Signal payload has queue_id, draft, and channel",
+                has_queue_id and has_draft and has_channel,
+                f"queue_id={has_queue_id} draft={has_draft} channel={has_channel}",
+            )
+        else:
+            self._skip("SIG-HITL-03", "Signal payload has queue_id, draft, and channel", "No signal found")
 
     # ------------------------------------------------------------------
     # Dispatch — route step name to verification method

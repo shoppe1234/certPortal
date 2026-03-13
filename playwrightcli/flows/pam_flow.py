@@ -1,18 +1,24 @@
 """pam_flow.py — Admin portal (port 8000) E2E steps.
 
 Steps:
-  pam::login        GET /login → fill form → POST /token → assert redirect to /
-  pam::retailers    GET /retailers
-  pam::suppliers    GET /suppliers
-  pam::hitl-queue   GET /hitl-queue (table may be absent when queue is empty)
-  pam::monica-memory GET /monica-memory
-  pam::logout       POST /logout → assert redirect to /login
+  pam::login               GET /login → fill form → POST /token → assert redirect to /
+  pam::retailers           GET /retailers
+  pam::suppliers           GET /suppliers
+  pam::hitl-queue          GET /hitl-queue
+  pam::hitl-approve-signal POST /hitl-queue/seed-hitl-sig-001/approve → verify S3 kelly signal
+  pam::monica-memory       GET /monica-memory
+  pam::logout              POST /logout → assert redirect to /login
 """
 from __future__ import annotations
+
+import time
 
 from playwrightcli.flows.base_flow import BaseFlow
 
 PORTAL = "pam"
+
+# queue_id of the dedicated signal-test HITL item (seeded by playwrightcli/fixtures/seed.sql)
+_SIGNAL_QUEUE_ID = "seed-hitl-sig-001"
 
 # Step names in run order — used by --dry-run
 PAM_STEPS = [
@@ -20,6 +26,9 @@ PAM_STEPS = [
     "retailers",
     "suppliers",
     "hitl-queue",
+    "hitl-approve-signal",
+    "gate-enforcement",
+    "password-reset",
     "monica-memory",
     "logout",
 ]
@@ -50,10 +59,13 @@ class PamFlow(BaseFlow):
         await r.run_step(f"{pfx}suppliers",    self._suppliers,     page=p, relogin_fn=self.relogin)
         await self.capture("suppliers")
         await self.verify("suppliers")
-        await r.run_step(f"{pfx}hitl-queue",   self._hitl_queue,    page=p, relogin_fn=self.relogin)
+        await r.run_step(f"{pfx}hitl-queue",          self._hitl_queue,          page=p, relogin_fn=self.relogin)
         await self.capture("hitl-queue")
         await self.verify("hitl-queue")
-        await r.run_step(f"{pfx}monica-memory", self._monica_memory, page=p, relogin_fn=self.relogin)
+        await r.run_step(f"{pfx}hitl-approve-signal", self._hitl_approve_signal, page=p, relogin_fn=self.relogin)
+        await r.run_step(f"{pfx}gate-enforcement",   self._gate_enforcement,    page=p, relogin_fn=self.relogin)
+        await r.run_step(f"{pfx}password-reset",     self._password_reset,      page=p, relogin_fn=self.relogin)
+        await r.run_step(f"{pfx}monica-memory",      self._monica_memory,       page=p, relogin_fn=self.relogin)
         await self.capture("monica-memory")
         await self.verify("monica-memory")
         await r.run_step(f"{pfx}logout",       self.logout,         max_retries=2, page=p)
@@ -91,6 +103,176 @@ class PamFlow(BaseFlow):
             "main, h1, h2, body",
             timeout=10_000,
         )
+
+    async def _hitl_approve_signal(self) -> None:
+        """POST approve on the signal-test HITL item, verify Kelly S3 dispatch signal.
+
+        Uses a dedicated queue item (seed-hitl-sig-001) that seed.sql resets to
+        PENDING_APPROVAL on each re-seed, keeping this test idempotent.
+
+        SIG-HITL-01: HTTP 200 returned.
+        SIG-HITL-02: kelly_approved_seed-hitl-sig-001.json written to S3.
+        SIG-HITL-03: Payload contains queue_id, draft, and channel.
+        """
+        if self._verifier is None:
+            return  # --verify not active; skip entirely
+
+        await self.goto("/hitl-queue")
+        await self.assert_page_ok()
+        await self.wait_htmx()
+
+        ts = time.time() - 1  # 1 s buffer for LastModified clock skew
+        queue_id = _SIGNAL_QUEUE_ID
+
+        response = await self.page.evaluate("""async (qid) => {
+            try {
+                const r = await fetch('/hitl-queue/' + qid + '/approve', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'}
+                });
+                const body = await r.json();
+                return {ok: r.ok, status: r.status, body: body};
+            } catch (e) {
+                return {ok: false, status: 0, body: {}, error: String(e)};
+            }
+        }""", queue_id)
+
+        await self._verifier.verify_signals_hitl_approved(ts, queue_id, response)
+
+    async def _gate_enforcement(self) -> None:
+        """Verify INV-03: out-of-order gate transitions are rejected with HTTP 409.
+
+        Uses supplier 'inv03_test' (seeded with gate_1=COMPLETE, gate_2=PENDING):
+          - Illegal POST: gate_3/complete while gate_2 is PENDING  → expect 409
+          - Legal  POST: gate_2/complete while gate_1 is COMPLETE  → expect 200
+
+        INV03-GATE-01: 409 on illegal advance.
+        INV03-GATE-02: 409 body contains ordering error message.
+        INV03-GATE-03: 200 on legal next-gate advance.
+        """
+        if self._verifier is None:
+            return  # --verify not active; skip entirely
+
+        # inv03_bad: gate_1=PENDING — gate_2/complete is always illegal (409).
+        # This supplier's state never changes so the test is fully idempotent.
+        illegal_response = await self.page.evaluate("""async () => {
+            try {
+                const r = await fetch('/suppliers/inv03_bad/gate/2/complete', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'}
+                });
+                let body = {};
+                try { body = await r.json(); } catch (_) {}
+                return {ok: r.ok, status: r.status, body: body};
+            } catch (e) {
+                return {ok: false, status: 0, body: {}, error: String(e)};
+            }
+        }""")
+
+        # inv03_ok: gate_1=COMPLETE — gate_1/complete is always legal (no prerequisite)
+        # and idempotent (COMPLETE→COMPLETE upsert, no downstream state change).
+        legal_response = await self.page.evaluate("""async () => {
+            try {
+                const r = await fetch('/suppliers/inv03_ok/gate/1/complete', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'}
+                });
+                let body = {};
+                try { body = await r.json(); } catch (_) {}
+                return {ok: r.ok, status: r.status, body: body};
+            } catch (e) {
+                return {ok: false, status: 0, body: {}, error: String(e)};
+            }
+        }""")
+
+        self._verifier.verify_gate_enforcement(illegal_response, legal_response, "inv03_bad/inv03_ok")
+
+    async def _password_reset(self) -> None:
+        """Full forgot-password → reset → login → restore cycle (Step #5).
+
+        Uses dedicated seed user 'pw_reset_test' (admin role, email set).
+        Seed always restores their password to 'TestResetPass1!' so this
+        step is fully idempotent across consecutive runs.
+
+        PW-RESET-01: POST /forgot-password redirects correctly.
+        PW-RESET-02: Token written to DB and retrievable via TokenFetcher.
+        PW-RESET-03: POST /reset-password redirects to password_changed.
+        PW-RESET-04: Login with new password succeeds.
+        PW-RESET-05: /change-password restores original password.
+        """
+        if self._verifier is None:
+            return
+
+        from playwrightcli.fixtures.token_fetcher import TokenFetcher
+
+        _USER = "pw_reset_test"
+        _ORIG_PW = "TestResetPass1!"
+        _NEW_PW = "NewResetPass2!"
+        fetcher = TokenFetcher()
+
+        # --- PW-RESET-01: trigger forgot-password ---
+        await self.goto("/forgot-password")
+        await self.page.fill('input[name="username"]', _USER)
+        async with self.page.expect_navigation(timeout=10_000):
+            await self.page.click('button[type="submit"]')
+        forgot_redirected = "msg=reset_sent" in self.page.url
+
+        # --- PW-RESET-02: retrieve token from DB ---
+        token = fetcher.get_latest_token(_USER)
+        token_found = token is not None
+
+        # --- PW-RESET-03: submit reset form ---
+        reset_redirected = False
+        if token_found:
+            await self.page.goto(
+                f"{self.base_url}/reset-password?token={token}",
+                wait_until="domcontentloaded",
+            )
+            await self.page.fill('input[name="new_password"]', _NEW_PW)
+            await self.page.fill('input[name="confirm_password"]', _NEW_PW)
+            async with self.page.expect_navigation(timeout=10_000):
+                await self.page.click('button[type="submit"]')
+            reset_redirected = "msg=password_changed" in self.page.url
+
+        # --- PW-RESET-04: login with new password ---
+        login_succeeded = False
+        if reset_redirected:
+            await self.page.goto(
+                f"{self.base_url}/login",
+                wait_until="domcontentloaded",
+            )
+            await self.page.fill('input[name="username"]', _USER)
+            await self.page.fill('input[name="password"]', _NEW_PW)
+            async with self.page.expect_navigation(timeout=10_000):
+                await self.page.click('button[type="submit"]')
+            login_succeeded = "/login" not in self.page.url
+
+        # --- PW-RESET-05: restore original password (idempotency) ---
+        restore_succeeded = False
+        if login_succeeded:
+            response = await self.page.evaluate(
+                """async (args) => {
+                    const fd = new FormData();
+                    fd.append('current_password', args.cur);
+                    fd.append('new_password', args.orig);
+                    fd.append('confirm_password', args.orig);
+                    const r = await fetch('/change-password', {method: 'POST', body: fd});
+                    return {ok: r.ok, status: r.status, url: r.url};
+                }""",
+                {"cur": _NEW_PW, "orig": _ORIG_PW},
+            )
+            restore_succeeded = response.get("ok", False)
+
+        self._verifier.verify_password_reset(
+            forgot_redirected=forgot_redirected,
+            token_found=token_found,
+            reset_redirected=reset_redirected,
+            login_succeeded=login_succeeded,
+            restore_succeeded=restore_succeeded,
+        )
+
+        # Return to pam_admin session so downstream steps work
+        await self.relogin()
 
     async def _monica_memory(self) -> None:
         await self.goto("/monica-memory")

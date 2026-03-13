@@ -30,6 +30,8 @@ def _preflight(portal_names: list[str]) -> bool:
     """HTTP GET /health for each portal. Returns True if all respond 200."""
     all_ok = True
     for name in portal_names:
+        if name == "scope":
+            continue  # scope checks chrissy + meredith which are already checked
         url = PORTALS[name]["url"] + "/health"
         try:
             with urllib.request.urlopen(url, timeout=TIMEOUTS["preflight"]) as resp:
@@ -60,9 +62,10 @@ async def _run_portal(
     from playwright.async_api import async_playwright
 
     flow_map = {
-        "pam": ("playwrightcli.flows.pam_flow", "PamFlow"),
+        "pam":      ("playwrightcli.flows.pam_flow",      "PamFlow"),
         "meredith": ("playwrightcli.flows.meredith_flow", "MeredithFlow"),
-        "chrissy": ("playwrightcli.flows.chrissy_flow", "ChrissyFlow"),
+        "chrissy":  ("playwrightcli.flows.chrissy_flow",  "ChrissyFlow"),
+        "scope":    ("playwrightcli.flows.scope_flow",    "ScopeFlow"),
     }
     module_path, class_name = flow_map[name]
     import importlib
@@ -74,13 +77,17 @@ async def _run_portal(
         ctx = await browser.new_context()
         page = await ctx.new_page()
         try:
-            flow = FlowClass(
-                page=page,
-                config=PORTALS[name],
-                runner=runner,
-                observer_queue=observer_queue,
-                verifier=verifier,
-            )
+            # ScopeFlow is standalone — no portal config or observer queue
+            if name == "scope":
+                flow = FlowClass(page=page, runner=runner, verifier=verifier)
+            else:
+                flow = FlowClass(
+                    page=page,
+                    config=PORTALS[name],
+                    runner=runner,
+                    observer_queue=observer_queue,
+                    verifier=verifier,
+                )
             await flow.run()
         finally:
             await ctx.close()
@@ -132,11 +139,13 @@ def _dry_run(portal_names: list[str], mm: MemoryManager, verify: bool = False) -
     from playwrightcli.flows.pam_flow import PAM_STEPS
     from playwrightcli.flows.meredith_flow import MEREDITH_STEPS
     from playwrightcli.flows.chrissy_flow import CHRISSY_STEPS
+    from playwrightcli.flows.scope_flow import SCOPE_STEPS
 
     step_map = {
-        "pam": PAM_STEPS,
+        "pam":      PAM_STEPS,
         "meredith": MEREDITH_STEPS,
-        "chrissy": CHRISSY_STEPS,
+        "chrissy":  CHRISSY_STEPS,
+        "scope":    SCOPE_STEPS,
     }
 
     # Requirement IDs that will be checked per step
@@ -145,15 +154,26 @@ def _dry_run(portal_names: list[str], mm: MemoryManager, verify: bool = False) -
         "pam::retailers": ["PAM-RET-01..03"],
         "pam::suppliers": ["PAM-SUP-01..04"],
         "pam::hitl-queue": ["PAM-HITL-01..04"],
+        "pam::hitl-approve-signal": ["SIG-HITL-01..03"],
+        "pam::gate-enforcement":    ["INV03-GATE-01..03"],
+        "pam::password-reset":      ["PW-RESET-01..05"],
         "pam::monica-memory": ["PAM-MEM-01..03"],
         "meredith::login": ["MER-AUTH-02,04", "XPORT-02,03,05"],
         "meredith::spec-setup": ["MER-SPEC-01..05"],
         "meredith::supplier-status": ["MER-STATUS-01..05"],
+        "meredith::yaml-wizard-signal": ["SIG-YAML2-01..03"],
         "chrissy::login": ["CHR-AUTH-02,04", "CHR-DASH-01..05", "XPORT-02,03,05"],
         "chrissy::scenarios": ["CHR-SCEN-01..05"],
         "chrissy::errors": ["CHR-ERR-01..04"],
         "chrissy::patches": ["CHR-PATCH-01..06"],
+        "chrissy::patch-apply-signal": ["SIG-PATCH-01..03"],
         "chrissy::certification": ["CHR-CERT-01..02"],
+        "scope::supplier-a-patches":   ["SCOPE-SUP-01", "SCOPE-SUP-02"],
+        "scope::supplier-a-scenarios": ["SCOPE-SUP-03", "SCOPE-SUP-04"],
+        "scope::supplier-b-patches":   ["SCOPE-SUP-05", "SCOPE-SUP-06"],
+        "scope::supplier-b-scenarios": ["SCOPE-SUP-07", "SCOPE-SUP-08"],
+        "scope::retailer-a-status":    ["SCOPE-RET-01", "SCOPE-RET-02"],
+        "scope::retailer-b-status":    ["SCOPE-RET-03", "SCOPE-RET-04"],
     }
 
     print("\n--- DRY RUN (no browser opened) ---\n")
@@ -208,7 +228,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--portal",
-        choices=["pam", "meredith", "chrissy", "all"],
+        choices=["pam", "meredith", "chrissy", "scope", "all"],
         default="all",
         help="Which portal(s) to test (default: all)",
     )
@@ -262,7 +282,7 @@ def main() -> None:
         return
 
     portal_names = (
-        ["pam", "meredith", "chrissy"] if args.portal == "all" else [args.portal]
+        ["pam", "meredith", "chrissy", "scope"] if args.portal == "all" else [args.portal]
     )
 
     # Auto-consolidate so this run benefits from previous feedback
@@ -299,7 +319,21 @@ def main() -> None:
     verifiers: dict | None = None
     if args.verify:
         from playwrightcli.requirements_verifier import RequirementsVerifier
-        verifiers = {name: RequirementsVerifier(portal=name) for name in portal_names}
+
+        # Build S3 signal checker for signal integration tests (Step #2).
+        # Degrades gracefully: if boto3 is missing or S3 is unreachable, signal
+        # checks are recorded as SKIP rather than crashing the run.
+        signal_checker = None
+        try:
+            from playwrightcli.fixtures.signal_checker import SignalChecker
+            signal_checker = SignalChecker()
+        except Exception as sc_err:
+            print(f"  WARN  SignalChecker unavailable — SIG-* checks will SKIP ({sc_err})")
+
+        verifiers = {
+            name: RequirementsVerifier(portal=name, signal_checker=signal_checker)
+            for name in portal_names
+        }
 
     if args.observe:
         # Run with concurrent observer (single event loop)

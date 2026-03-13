@@ -387,10 +387,26 @@ async def home(
             "SELECT retailer_slug, spec_version, thesis_s3_key, created_at FROM retailer_specs ORDER BY created_at DESC LIMIT 1"
         )
 
-    supplier_count = await conn.fetchval("SELECT COUNT(*) FROM hitl_gate_status") or 0
-    certified_count = await conn.fetchval(
-        "SELECT COUNT(*) FROM hitl_gate_status WHERE gate_3 = 'CERTIFIED'"
-    ) or 0
+    # Scope counts to this retailer's suppliers (INV-06).
+    # Admin users (retailer_slug=None) see the full count.
+    _supplier_subq = (
+        "SELECT supplier_slug FROM portal_users "
+        "WHERE retailer_slug = $1 AND role = 'supplier' AND is_active = TRUE"
+    )
+    if retailer_slug:
+        supplier_count = await conn.fetchval(
+            f"SELECT COUNT(*) FROM hitl_gate_status WHERE supplier_id IN ({_supplier_subq})",
+            retailer_slug,
+        ) or 0
+        certified_count = await conn.fetchval(
+            f"SELECT COUNT(*) FROM hitl_gate_status WHERE gate_3 = 'CERTIFIED' AND supplier_id IN ({_supplier_subq})",
+            retailer_slug,
+        ) or 0
+    else:
+        supplier_count = await conn.fetchval("SELECT COUNT(*) FROM hitl_gate_status") or 0
+        certified_count = await conn.fetchval(
+            "SELECT COUNT(*) FROM hitl_gate_status WHERE gate_3 = 'CERTIFIED'"
+        ) or 0
 
     return templates.TemplateResponse(
         "meredith_home.html",
@@ -566,8 +582,17 @@ async def supplier_status(
     conn=Depends(get_connection),
     user: dict = Depends(get_current_user),
 ):
-    rows = await conn.fetch(
-        """
+    retailer_slug = user.get("retailer_slug")
+    # Scope supplier list to this retailer's registered suppliers (INV-06).
+    # Retailers may only see suppliers whose portal_users row has their retailer_slug.
+    # Admin users (retailer_slug=None) see all suppliers.
+    _scope_where = (
+        "WHERE h.supplier_id IN ("
+        "  SELECT supplier_slug FROM portal_users"
+        "  WHERE retailer_slug = $1 AND role = 'supplier' AND is_active = TRUE"
+        ")"
+    )
+    _base_query = """
         SELECT
             h.supplier_id AS supplier_slug,
             h.gate_1, h.gate_2, h.gate_3,
@@ -577,9 +602,11 @@ async def supplier_status(
             (SELECT COUNT(*) FROM test_occurrences t
              WHERE t.supplier_slug = h.supplier_id AND t.status = 'FAIL') AS fail_count
         FROM hitl_gate_status h
-        ORDER BY h.last_updated DESC
-        """
-    )
+    """
+    if retailer_slug:
+        rows = await conn.fetch(_base_query + _scope_where + " ORDER BY h.last_updated DESC", retailer_slug)
+    else:
+        rows = await conn.fetch(_base_query + " ORDER BY h.last_updated DESC")
     return templates.TemplateResponse(
         "meredith_supplier_status.html",
         {
@@ -603,6 +630,17 @@ async def supplier_status_partial(
     conn=Depends(get_connection),
     user: dict = Depends(get_current_user),
 ):
+    # Scope guard: retailer users may only poll suppliers in their own tenant (INV-06).
+    user_retailer = user.get("retailer_slug")
+    if user_retailer:
+        belongs = await conn.fetchval(
+            "SELECT 1 FROM portal_users "
+            "WHERE supplier_slug = $1 AND retailer_slug = $2 AND role = 'supplier' AND is_active = TRUE",
+            supplier_id, user_retailer,
+        )
+        if not belongs:
+            raise HTTPException(status_code=403, detail="Supplier not in your tenant")
+
     row = await conn.fetchrow(
         """
         SELECT supplier_id AS supplier_slug, gate_1, gate_2, gate_3, last_updated
