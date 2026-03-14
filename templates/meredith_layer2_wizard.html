@@ -115,11 +115,12 @@
                 hx-swap="innerHTML">
           &larr; Back
         </button>
-        <button type="button" class="btn btn-primary" onclick="collectSegmentOverrides()"
+        <button type="button" class="btn btn-primary"
                 hx-post="/yaml-wizard/layer2/{{ session.id }}/save-step"
                 hx-include="#step-form"
                 hx-target="#wizard-content"
-                hx-swap="innerHTML">
+                hx-swap="innerHTML"
+                data-collect="segments">
           Next &rarr;
         </button>
       </div>
@@ -147,11 +148,12 @@
                 hx-swap="innerHTML">
           &larr; Back
         </button>
-        <button type="button" class="btn btn-primary" onclick="collectBusinessRules()"
+        <button type="button" class="btn btn-primary"
                 hx-post="/yaml-wizard/layer2/{{ session.id }}/save-step"
                 hx-include="#step-form"
                 hx-target="#wizard-content"
-                hx-swap="innerHTML">
+                hx-swap="innerHTML"
+                data-collect="rules">
           Next &rarr;
         </button>
       </div>
@@ -312,58 +314,22 @@
 {% endif %}
 
 {% block extra_js %}
+<script src="/static/js/meredith_wizard.js"></script>
+<script src="/static/js/segment_config.js"></script>
+{% if session %}
 <script>
-function collectSegmentOverrides() {
-  /* Collect all segment override inputs into a JSON object and store in hidden field */
-  var overrides = {};
-  document.querySelectorAll('.seg-element-row').forEach(function(row) {
-    var segId = row.dataset.segment;
-    var elemId = row.dataset.element;
-    if (!segId || !elemId) return;
-    var qualInput = row.querySelector('.elem-qualifier');
-    var noteInput = row.querySelector('.elem-note');
-    var reqInput = row.querySelector('.elem-required');
-
-    if (!overrides[segId]) overrides[segId] = {elements: {}};
-    var elemData = {};
-    if (qualInput && qualInput.value) elemData.qualifier = qualInput.value;
-    if (noteInput && noteInput.value) elemData.note = noteInput.value;
-    if (reqInput) elemData.required = reqInput.checked;
-    if (Object.keys(elemData).length > 0) {
-      overrides[segId].elements[elemId] = elemData;
-    }
+document.addEventListener("DOMContentLoaded", function() {
+  window.certPortal.wizard.init({
+    stepCount: 5,
+    currentStep: {{ current_step }},
+    sessionId: "{{ session.id }}",
+    saveUrl: "/yaml-wizard/layer2/{{ session.id }}/save-step"
   });
-  document.getElementById('segment-overrides-json').value = JSON.stringify(overrides);
-}
-
-function collectBusinessRules() {
-  /* Collect business rule toggles into JSON array */
-  var rules = [];
-  document.querySelectorAll('.rule-toggle-row').forEach(function(row) {
-    var ruleId = row.dataset.ruleId;
-    var enabledToggle = row.querySelector('.rule-enabled');
-    if (!ruleId) return;
-    var rule = {id: ruleId, enabled: enabledToggle ? enabledToggle.checked : false};
-    var paramInputs = row.querySelectorAll('.rule-param');
-    paramInputs.forEach(function(inp) {
-      rule[inp.name] = inp.value;
-    });
-    rules.push(rule);
-  });
-  document.getElementById('business-rules-json').value = JSON.stringify(rules);
-}
-
-/* Segment accordion expand/collapse */
-document.addEventListener('click', function(e) {
-  var header = e.target.closest('.seg-accordion-header');
-  if (!header) return;
-  var body = header.nextElementSibling;
-  if (body && body.classList.contains('seg-accordion-body')) {
-    body.classList.toggle('hidden');
-    var arrow = header.querySelector('.seg-arrow');
-    if (arrow) arrow.textContent = body.classList.contains('hidden') ? '\u25B6' : '\u25BC';
+  if ({{ current_step }} === 1) {
+    window.certPortal.segmentConfig.init();
   }
 });
 </script>
+{% endif %}
 {% endblock %}
 {% endblock %}

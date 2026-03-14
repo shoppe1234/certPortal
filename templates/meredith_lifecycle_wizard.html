@@ -370,5 +370,22 @@
 {% endif %}
 
 {% block extra_js %}
+<script src="/static/js/meredith_wizard.js"></script>
+<script src="/static/js/lifecycle_editor.js"></script>
+{% if session %}
+<script>
+document.addEventListener("DOMContentLoaded", function() {
+  window.certPortal.wizard.init({
+    stepCount: 5,
+    currentStep: {{ current_step }},
+    sessionId: "{{ session.id }}",
+    saveUrl: "/lifecycle-wizard/{{ session.id }}/save-step"
+  });
+  if ({{ current_step }} === 3 && "{{ state_json.get('mode', '') }}" !== "use") {
+    window.certPortal.lifecycleEditor.init();
+  }
+});
+</script>
+{% endif %}
 {% endblock %}
 {% endblock %}

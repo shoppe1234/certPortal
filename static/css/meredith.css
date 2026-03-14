@@ -299,6 +299,52 @@ body {
 .artifact-downloads { display: flex; gap: 0.75rem; flex-wrap: wrap; }
 .artifact-dl-icon { font-size: 14px; }
 
+/* ── Wizard Step Indicator — Transitions & Mobile ────────────── */
+.wizard-step-circle {
+  transition: border-color 300ms ease, background 300ms ease, color 300ms ease, transform 200ms ease;
+}
+.wizard-step--active .wizard-step-circle { transform: scale(1.1); }
+.wizard-step-label { transition: color 300ms ease, font-weight 200ms ease; }
+.wizard-step-connector { transition: background 400ms ease; }
+
+/* Mobile: stack steps vertically on narrow screens */
+@media (max-width: 640px) {
+  .wizard-steps { flex-direction: column; align-items: flex-start; gap: 0.25rem; padding: 1rem; }
+  .wizard-step { gap: 0.5rem; }
+  .wizard-step-connector { width: 2px; height: 20px; min-width: 2px; margin: 0 0 0 15px; }
+}
+
+/* ── Auto-save Indicator ─────────────────────────────────────── */
+.wizard-autosave { font-size: 12px; color: var(--color-text-muted); transition: opacity 300ms ease; }
+.wizard-autosave--saving { color: var(--color-warn); }
+.wizard-autosave--saved { color: var(--color-success); }
+
+/* ── State Modal Transitions ─────────────────────────────────── */
+.state-modal-overlay { opacity: 0; transition: opacity 200ms ease; pointer-events: none; }
+.state-modal-overlay.visible { opacity: 1; pointer-events: auto; }
+.state-modal { transform: translateY(16px); transition: transform 200ms ease; }
+.state-modal-overlay.visible .state-modal { transform: translateY(0); }
+
+/* ── Segment Accordion Transitions ───────────────────────────── */
+.seg-accordion-body { overflow: hidden; transition: max-height 250ms ease, padding 250ms ease; }
+.seg-accordion-body.hidden { max-height: 0; padding: 0; display: block; }
+.seg-accordion-body:not(.hidden) { max-height: 2000px; }
+.seg-arrow { transition: transform 200ms ease; display: inline-block; }
+.seg-accordion-header[aria-expanded="true"] .seg-arrow { transform: rotate(90deg); }
+
+/* ── Transition Diagram (ASCII) ──────────────────────────────── */
+.transition-diagram { background: var(--color-surface-2); border: 1px solid var(--color-border); border-radius: var(--radius); padding: 1rem; margin-top: 1rem; font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace; font-size: 12px; line-height: 1.6; white-space: pre; overflow-x: auto; color: var(--color-text); }
+.transition-diagram-title { font-family: var(--font-sans); font-size: 13px; font-weight: 600; margin-bottom: 0.5rem; color: var(--color-text-muted); }
+
+/* ── Validation Error Highlight ──────────────────────────────── */
+.form-input.field-error, .form-select.field-error { border-color: var(--color-error); box-shadow: 0 0 0 3px rgba(239,68,68,0.15); }
+.field-error-msg { font-size: 12px; color: var(--color-error); margin-top: 4px; }
+
+/* ── YAML Live Preview Pane ──────────────────────────────────── */
+.yaml-live-preview { background: #1e1e2e; color: #cdd6f4; padding: 1rem 1.25rem; border-radius: var(--radius); font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace; font-size: 12px; line-height: 1.6; overflow-x: auto; white-space: pre; max-height: 300px; overflow-y: auto; margin-top: 1rem; border: 1px solid var(--color-border); }
+.yaml-live-preview-header { display: flex; justify-content: space-between; align-items: center; margin-top: 1rem; margin-bottom: 0.5rem; }
+.yaml-live-preview-header h4 { font-size: 13px; font-weight: 600; color: var(--color-text-muted); }
+
 /* ── Mapping Notes ───────────────────────────────────────────── */
 .mapping-notes-editor { margin-bottom: 1rem; }
 .mapping-note-row { display: flex; gap: 0.75rem; align-items: center; margin-bottom: 0.5rem; }
