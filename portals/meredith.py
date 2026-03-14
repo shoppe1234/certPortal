@@ -47,6 +47,16 @@ from certportal.core.database import get_connection, get_pool
 from certportal.core.gate_enforcer import GateOrderViolation, get_gate_status, transition_gate
 from certportal.core.workspace import S3AgentWorkspace
 
+from certportal.generators.template_loader import (
+    load_available_lifecycles,
+    load_lifecycle_detail,
+)
+from certportal.generators.lifecycle_builder import build_lifecycle, validate_lifecycle
+from certportal.generators.version_registry import (
+    get_available_versions,
+    get_transaction_sets_for_version,
+)
+
 BASE_DIR = Path(__file__).parent.parent
 
 
@@ -806,6 +816,357 @@ async def change_password(
 
     return RedirectResponse(
         url="/change-password?msg=Password+changed+successfully", status_code=302
+    )
+
+
+# ---------------------------------------------------------------------------
+# Protected: Lifecycle Wizard (Phase D)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/lifecycle-wizard", response_class=HTMLResponse)
+async def lifecycle_wizard_landing(
+    request: Request,
+    conn=Depends(get_connection),
+    user: dict = Depends(get_current_user),
+):
+    """D1 — Lifecycle wizard landing page. Lists active sessions and start-new button."""
+    retailer_slug = user.get("retailer_slug")
+    if retailer_slug:
+        rows = await conn.fetch(
+            "SELECT id, session_name, step_number, created_at, updated_at "
+            "FROM wizard_sessions "
+            "WHERE retailer_slug = $1 AND wizard_type = 'lifecycle' AND completed_at IS NULL "
+            "ORDER BY updated_at DESC",
+            retailer_slug,
+        )
+    else:
+        # Admin sees all
+        rows = await conn.fetch(
+            "SELECT id, session_name, step_number, created_at, updated_at "
+            "FROM wizard_sessions "
+            "WHERE wizard_type = 'lifecycle' AND completed_at IS NULL "
+            "ORDER BY updated_at DESC",
+        )
+
+    return templates.TemplateResponse(
+        "meredith_lifecycle_wizard.html",
+        {
+            "request": request,
+            "portal_name": "meredith",
+            "current_user": user,
+            "session": None,
+            "active_sessions": [dict(r) for r in rows],
+            "available_lifecycles": load_available_lifecycles(),
+        },
+    )
+
+
+@router.post("/lifecycle-wizard/new")
+async def lifecycle_wizard_new(
+    request: Request,
+    conn=Depends(get_connection),
+    user: dict = Depends(get_current_user),
+    session_name: str = Form(""),
+):
+    """D2 — Create a new lifecycle wizard session in DB. Redirect to session page."""
+    retailer_slug = user.get("retailer_slug") or "admin"
+    row = await conn.fetchrow(
+        "INSERT INTO wizard_sessions (retailer_slug, wizard_type, session_name, step_number, state_json) "
+        "VALUES ($1, 'lifecycle', $2, 0, '{}') "
+        "RETURNING id",
+        retailer_slug,
+        session_name or None,
+    )
+    session_id = row["id"]
+    return RedirectResponse(url=f"/lifecycle-wizard/{session_id}", status_code=302)
+
+
+@router.get("/lifecycle-wizard/{session_id}", response_class=HTMLResponse)
+async def lifecycle_wizard_session(
+    request: Request,
+    session_id: str,
+    conn=Depends(get_connection),
+    user: dict = Depends(get_current_user),
+):
+    """D3 — Load wizard session from DB and render at correct step."""
+    row = await conn.fetchrow(
+        "SELECT id, retailer_slug, session_name, step_number, state_json, "
+        "x12_version, created_at, updated_at, completed_at "
+        "FROM wizard_sessions WHERE id = $1",
+        session_id,
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Wizard session not found")
+
+    # Scope check: retailer_slug must match (INV-06)
+    user_retailer = user.get("retailer_slug")
+    if user_retailer and row["retailer_slug"] != user_retailer:
+        raise HTTPException(status_code=403, detail="Session not in your tenant")
+
+    session = dict(row)
+    state_json = session.get("state_json") or {}
+    if isinstance(state_json, str):
+        state_json = json.loads(state_json)
+    current_step = session["step_number"]
+
+    # Build context based on current step
+    context = {
+        "request": request,
+        "portal_name": "meredith",
+        "current_user": user,
+        "session": session,
+        "current_step": current_step,
+        "state_json": state_json,
+        "available_lifecycles": [],
+        "available_versions": [],
+        "transaction_sets": [],
+        "lifecycle_states": {},
+        "editor_states": {},
+    }
+
+    if current_step == 0:
+        context["available_lifecycles"] = load_available_lifecycles()
+    elif current_step == 1:
+        context["available_versions"] = get_available_versions()
+    elif current_step == 2:
+        x12_ver = state_json.get("x12_version", "004010")
+        tx_sets = get_transaction_sets_for_version(x12_ver)
+        context["transaction_sets"] = [
+            {"transaction_set": t.transaction_set, "name": t.name, "functional_group": t.functional_group}
+            for t in tx_sets
+        ]
+    elif current_step == 3:
+        mode = state_json.get("mode", "create")
+        if mode == "use":
+            # Load lifecycle states read-only
+            lc_ref = state_json.get("lifecycle_ref")
+            if lc_ref:
+                lc_data = load_lifecycle_detail(lc_ref)
+                context["lifecycle_states"] = lc_data.get("lifecycle", {}).get("states", {})
+        else:
+            # Copy or create — load editor states
+            if mode == "copy" and "states_config" not in state_json:
+                # First visit to step 3 in copy mode: pre-fill from source lifecycle
+                lc_ref = state_json.get("lifecycle_ref")
+                if lc_ref:
+                    lc_data = load_lifecycle_detail(lc_ref)
+                    context["editor_states"] = lc_data.get("lifecycle", {}).get("states", {})
+                else:
+                    context["editor_states"] = {}
+            else:
+                context["editor_states"] = (state_json.get("states_config") or {}).get("states", {})
+
+    return templates.TemplateResponse("meredith_lifecycle_wizard.html", context)
+
+
+@router.post("/lifecycle-wizard/{session_id}/save-step", response_class=HTMLResponse)
+async def lifecycle_wizard_save_step(
+    request: Request,
+    session_id: str,
+    conn=Depends(get_connection),
+    user: dict = Depends(get_current_user),
+):
+    """D4 — Save current step data and return HTMX partial for next step."""
+    row = await conn.fetchrow(
+        "SELECT id, retailer_slug, session_name, step_number, state_json, "
+        "x12_version, created_at, updated_at, completed_at "
+        "FROM wizard_sessions WHERE id = $1",
+        session_id,
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Wizard session not found")
+
+    user_retailer = user.get("retailer_slug")
+    if user_retailer and row["retailer_slug"] != user_retailer:
+        raise HTTPException(status_code=403, detail="Session not in your tenant")
+
+    session = dict(row)
+    state_json = session.get("state_json") or {}
+    if isinstance(state_json, str):
+        state_json = json.loads(state_json)
+
+    # Parse form data
+    form = await request.form()
+    step_number = int(form.get("step_number", "0"))
+    go_back = form.get("go_back")
+
+    if go_back:
+        # Navigate backward
+        new_step = max(0, step_number - 1)
+    else:
+        # Save step data into state_json
+        if step_number == 0:
+            state_json["mode"] = form.get("mode", "use")
+            state_json["lifecycle_ref"] = form.get("lifecycle_ref", "")
+            state_json["lifecycle_name"] = form.get("lifecycle_name", "")
+        elif step_number == 1:
+            state_json["x12_version"] = form.get("x12_version", "004010")
+        elif step_number == 2:
+            # Multi-value checkboxes
+            transactions = form.getlist("transactions")
+            state_json["transactions"] = transactions
+        elif step_number == 3:
+            states_json_str = form.get("states_json", "{}")
+            try:
+                states_data = json.loads(states_json_str)
+            except (json.JSONDecodeError, TypeError):
+                states_data = {}
+            state_json["states_config"] = {"states": states_data}
+
+        # Determine next step
+        mode = state_json.get("mode", "use")
+        new_step = step_number + 1
+
+        # For "use" mode, step 3 (states) is skipped conceptually but still rendered as read-only
+        # All modes pass through all steps; the template handles the "use" mode display
+
+    # Update DB
+    x12_ver = state_json.get("x12_version")
+    await conn.execute(
+        "UPDATE wizard_sessions SET step_number = $1, state_json = $2, "
+        "x12_version = $3, updated_at = NOW() WHERE id = $4",
+        new_step,
+        json.dumps(state_json),
+        x12_ver,
+        session_id,
+    )
+
+    # Re-fetch session for template
+    session["step_number"] = new_step
+    session["state_json"] = state_json
+    session["x12_version"] = x12_ver
+
+    # Build context for the new step
+    context = {
+        "request": request,
+        "portal_name": "meredith",
+        "current_user": user,
+        "session": session,
+        "current_step": new_step,
+        "state_json": state_json,
+        "available_lifecycles": [],
+        "available_versions": [],
+        "transaction_sets": [],
+        "lifecycle_states": {},
+        "editor_states": {},
+    }
+
+    if new_step == 0:
+        context["available_lifecycles"] = load_available_lifecycles()
+    elif new_step == 1:
+        context["available_versions"] = get_available_versions()
+    elif new_step == 2:
+        x12_v = state_json.get("x12_version", "004010")
+        tx_sets = get_transaction_sets_for_version(x12_v)
+        context["transaction_sets"] = [
+            {"transaction_set": t.transaction_set, "name": t.name, "functional_group": t.functional_group}
+            for t in tx_sets
+        ]
+    elif new_step == 3:
+        mode = state_json.get("mode", "create")
+        if mode == "use":
+            lc_ref = state_json.get("lifecycle_ref")
+            if lc_ref:
+                lc_data = load_lifecycle_detail(lc_ref)
+                context["lifecycle_states"] = lc_data.get("lifecycle", {}).get("states", {})
+        else:
+            if mode == "copy" and "states_config" not in state_json:
+                lc_ref = state_json.get("lifecycle_ref")
+                if lc_ref:
+                    lc_data = load_lifecycle_detail(lc_ref)
+                    context["editor_states"] = lc_data.get("lifecycle", {}).get("states", {})
+            else:
+                context["editor_states"] = (state_json.get("states_config") or {}).get("states", {})
+
+    return templates.TemplateResponse("meredith_lifecycle_wizard.html", context)
+
+
+@router.post("/lifecycle-wizard/{session_id}/generate", response_class=HTMLResponse)
+async def lifecycle_wizard_generate(
+    request: Request,
+    session_id: str,
+    conn=Depends(get_connection),
+    user: dict = Depends(get_current_user),
+):
+    """D5 — Finalize: build lifecycle YAML, validate, write to S3, mark complete."""
+    row = await conn.fetchrow(
+        "SELECT id, retailer_slug, session_name, step_number, state_json, "
+        "x12_version, created_at, updated_at, completed_at "
+        "FROM wizard_sessions WHERE id = $1",
+        session_id,
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Wizard session not found")
+
+    user_retailer = user.get("retailer_slug")
+    if user_retailer and row["retailer_slug"] != user_retailer:
+        raise HTTPException(status_code=403, detail="Session not in your tenant")
+
+    session = dict(row)
+    state_json = session.get("state_json") or {}
+    if isinstance(state_json, str):
+        state_json = json.loads(state_json)
+
+    mode = state_json.get("mode", "use")
+    lifecycle_ref = state_json.get("lifecycle_ref")
+    x12_version = state_json.get("x12_version", "004010")
+    lifecycle_name = state_json.get("lifecycle_name", "Custom Lifecycle")
+    states_config = state_json.get("states_config")
+
+    # Build lifecycle YAML
+    try:
+        lifecycle_yaml = build_lifecycle(
+            mode=mode,
+            lifecycle_ref=lifecycle_ref or None,
+            x12_version=x12_version,
+            name=lifecycle_name,
+            states_config=states_config,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"Lifecycle build error: {exc}")
+
+    # Validate
+    errors = validate_lifecycle(lifecycle_yaml)
+    if errors:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Lifecycle validation failed: {'; '.join(errors)}",
+        )
+
+    # Write to S3 via workspace
+    retailer_slug = session["retailer_slug"]
+    ws = S3AgentWorkspace(retailer_slug, "system")
+    s3_key = f"lifecycle/{x12_version}/lifecycle.yaml"
+    ws.upload(s3_key, lifecycle_yaml)
+    full_s3_key = f"{retailer_slug}/{s3_key}"
+
+    # Mark session complete
+    await conn.execute(
+        "UPDATE wizard_sessions SET step_number = 99, completed_at = NOW(), "
+        "updated_at = NOW() WHERE id = $1",
+        session_id,
+    )
+
+    session["step_number"] = 99
+    session["state_json"] = state_json
+
+    return templates.TemplateResponse(
+        "meredith_lifecycle_wizard.html",
+        {
+            "request": request,
+            "portal_name": "meredith",
+            "current_user": user,
+            "session": session,
+            "current_step": 99,
+            "state_json": state_json,
+            "s3_key": full_s3_key,
+            "available_lifecycles": [],
+            "available_versions": [],
+            "transaction_sets": [],
+            "lifecycle_states": {},
+            "editor_states": {},
+        },
     )
 
 

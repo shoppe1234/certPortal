@@ -1,0 +1,22 @@
+{# _wizard_step_indicator.html — Reusable wizard step progress indicator.
+   Accepts:
+     steps: list of dicts with keys: label (str), number (int)
+     current_step: int (0-based step number currently active)
+#}
+<div class="wizard-steps">
+  {% for step in steps %}
+  <div class="wizard-step {% if step.number < current_step %}wizard-step--complete{% elif step.number == current_step %}wizard-step--active{% else %}wizard-step--pending{% endif %}">
+    <div class="wizard-step-circle">
+      {% if step.number < current_step %}
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M3 7l3 3 5-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      {% else %}
+        {{ step.number + 1 }}
+      {% endif %}
+    </div>
+    <span class="wizard-step-label">{{ step.label }}</span>
+  </div>
+  {% if not loop.last %}
+  <div class="wizard-step-connector {% if step.number < current_step %}wizard-step-connector--complete{% endif %}"></div>
+  {% endif %}
+  {% endfor %}
+</div>

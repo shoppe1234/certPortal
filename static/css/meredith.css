@@ -174,3 +174,88 @@ body {
 .btn-logout:hover { border-color: var(--color-error); color: var(--color-error); background: #fef2f2; }
 .btn-nav-account { background: transparent; border: none; color: var(--color-text-muted); font-size: 12px; padding: 4px 10px; border-radius: var(--radius-sm); cursor: pointer; text-decoration: none; white-space: nowrap; font-family: var(--font-sans); transition: color var(--transition); }
 .btn-nav-account:hover { color: var(--color-primary); text-decoration: underline; }
+
+/* ── Wizard Step Indicator ───────────────────────────────────── */
+.wizard-steps { display: flex; align-items: center; gap: 0; margin-bottom: 2rem; padding: 1.25rem 1.5rem; background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius); box-shadow: var(--shadow); }
+.wizard-step { display: flex; align-items: center; gap: 0.5rem; flex-shrink: 0; }
+.wizard-step-circle { width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; border: 2px solid var(--color-border); color: var(--color-text-muted); background: var(--color-surface); transition: all var(--transition); }
+.wizard-step--active .wizard-step-circle { border-color: var(--color-primary); background: var(--color-primary); color: #fff; }
+.wizard-step--complete .wizard-step-circle { border-color: var(--color-success); background: var(--color-success); color: #fff; }
+.wizard-step--pending .wizard-step-circle { border-color: var(--color-border); background: var(--color-surface-2); color: var(--color-text-muted); }
+.wizard-step-label { font-size: 13px; font-weight: 500; color: var(--color-text-muted); white-space: nowrap; }
+.wizard-step--active .wizard-step-label { color: var(--color-primary); font-weight: 600; }
+.wizard-step--complete .wizard-step-label { color: var(--color-success); }
+.wizard-step-connector { flex: 1; height: 2px; background: var(--color-border); margin: 0 0.5rem; min-width: 20px; }
+.wizard-step-connector--complete { background: var(--color-success); }
+
+/* ── Wizard Layout ───────────────────────────────────────────── */
+.wizard-session-bar { display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem; padding: 0.75rem 1rem; background: var(--color-primary-light); border-radius: var(--radius-sm); }
+.wizard-session-name { font-weight: 600; font-size: 15px; color: var(--color-primary); }
+.wizard-content { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius); padding: 2rem; box-shadow: var(--shadow); }
+.wizard-step-panel { }
+.wizard-step-title { font-size: 20px; font-weight: 700; margin-bottom: 0.5rem; }
+.wizard-nav { display: flex; justify-content: space-between; align-items: center; margin-top: 1.5rem; padding-top: 1.5rem; border-top: 1px solid var(--color-border); }
+
+/* ── Mode Cards (Step 0) ─────────────────────────────────────── */
+.mode-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; }
+.mode-card { display: block; cursor: pointer; }
+.mode-card input[type="radio"] { display: none; }
+.mode-card .mode-card-content { border: 2px solid var(--color-border); border-radius: var(--radius); padding: 1.25rem; transition: all var(--transition); }
+.mode-card input[type="radio"]:checked + .mode-card-content { border-color: var(--color-primary); background: var(--color-primary-light); }
+.mode-card:hover .mode-card-content { border-color: var(--color-primary); }
+.mode-card-title { font-size: 15px; font-weight: 600; margin-bottom: 0.4rem; }
+.mode-card-desc { font-size: 12px; line-height: 1.5; }
+
+/* ── Transaction Checkboxes (Step 2) ─────────────────────────── */
+.tx-checkbox-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 0.75rem; }
+.checkbox-card { display: flex; align-items: center; gap: 0.5rem; padding: 0.75rem 1rem; border: 1px solid var(--color-border); border-radius: var(--radius-sm); cursor: pointer; transition: all var(--transition); }
+.checkbox-card:hover { border-color: var(--color-primary); }
+.checkbox-card input[type="checkbox"]:checked ~ .checkbox-card-content { color: var(--color-primary); }
+.checkbox-card-code { font-weight: 700; font-size: 15px; }
+.checkbox-card-name { font-size: 11px; display: block; }
+
+/* ── Review (Step 4) ─────────────────────────────────────────── */
+.review-section { border: 1px solid var(--color-border); border-radius: var(--radius); overflow: hidden; }
+.review-row { display: flex; justify-content: space-between; padding: 0.75rem 1rem; border-bottom: 1px solid var(--color-border); }
+.review-row:last-child { border-bottom: none; }
+.review-label { font-weight: 600; font-size: 13px; color: var(--color-text-muted); }
+.review-value { font-size: 13px; font-weight: 500; }
+
+/* ── Generation success ──────────────────────────────────────── */
+.generation-success { text-align: center; padding: 2rem 1rem; }
+.generation-success-icon { font-size: 3rem; color: var(--color-success); margin-bottom: 1rem; }
+
+/* ── Session list (landing page) ─────────────────────────────── */
+.session-list { display: flex; flex-direction: column; gap: 0.75rem; }
+.session-card { display: block; padding: 1rem 1.25rem; border: 1px solid var(--color-border); border-radius: var(--radius); text-decoration: none; color: var(--color-text); transition: all var(--transition); }
+.session-card:hover { border-color: var(--color-primary); box-shadow: var(--shadow-md); }
+.session-card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.25rem; }
+.session-card-name { font-weight: 600; font-size: 14px; }
+.session-card-meta { font-size: 12px; }
+
+/* ── State Editor ────────────────────────────────────────────── */
+.state-editor { }
+.state-editor-header { margin-bottom: 1rem; }
+.state-editor-title { font-size: 16px; font-weight: 600; }
+.state-editor-subtitle { font-size: 13px; margin-top: 0.25rem; }
+.state-list { display: flex; flex-direction: column; gap: 0.75rem; margin-bottom: 1rem; }
+.state-card { border: 1px solid var(--color-border); border-radius: var(--radius); overflow: hidden; }
+.state-card-header { display: flex; justify-content: space-between; align-items: center; padding: 0.75rem 1rem; background: var(--color-surface-2); }
+.state-card-name { display: flex; align-items: center; gap: 0.5rem; }
+.state-card-actions { display: flex; gap: 0.5rem; }
+.state-card-body { padding: 0.75rem 1rem; }
+.state-detail { display: flex; gap: 0.5rem; align-items: flex-start; margin-bottom: 0.4rem; font-size: 13px; }
+.state-detail:last-child { margin-bottom: 0; }
+.state-detail-label { font-weight: 600; color: var(--color-text-muted); min-width: 80px; flex-shrink: 0; }
+.state-transitions { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.transition-pill { display: inline-flex; align-items: center; gap: 0.25rem; padding: 2px 8px; border-radius: 10px; background: var(--color-primary-light); color: var(--color-primary); font-size: 12px; font-weight: 500; }
+
+/* ── State Modal ─────────────────────────────────────────────── */
+.state-modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; z-index: 200; }
+.state-modal { background: var(--color-surface); border-radius: var(--radius); width: 500px; max-width: 90vw; max-height: 80vh; overflow-y: auto; box-shadow: 0 8px 24px rgba(0,0,0,0.15); }
+.state-modal-header { display: flex; justify-content: space-between; align-items: center; padding: 1rem 1.25rem; border-bottom: 1px solid var(--color-border); }
+.state-modal-header h4 { font-size: 16px; font-weight: 600; }
+.state-modal-body { padding: 1.25rem; }
+.state-modal-footer { display: flex; justify-content: flex-end; gap: 0.75rem; padding: 1rem 1.25rem; border-top: 1px solid var(--color-border); }
+.transition-row { display: flex; gap: 0.5rem; margin-bottom: 0.5rem; align-items: center; }
+.transition-row .form-input { flex: 1; margin-bottom: 0; }
