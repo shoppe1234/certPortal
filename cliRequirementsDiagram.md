@@ -172,22 +172,32 @@
   |-- runner.py                    step retry engine
   |-- memory_manager.py            step correction memory
   |-- observer.py                  design observer (Claude Vision)
-  |-- requirements_verifier.py     DOM assertions per page         [NEW]
-  |-- requirements_memory.py       trend tracking across runs      [NEW]
+  |-- requirements_verifier.py     DOM assertions per page
+  |-- requirements_memory.py       trend tracking across runs
   |-- feedback.md                  step correction log
   |-- memory.md                    step correction knowledge
-  |-- requirements_feedback.md     verification run log            [NEW]
-  |-- requirements_history.jsonl   structured run data             [NEW]
-  |-- requirements_memory.md       trend analysis                  [NEW]
+  |-- requirements_feedback.md     verification run log
+  |-- requirements_history.jsonl   structured run data
+  |-- requirements_memory.md       trend analysis
   +-- flows/
-      |-- base_flow.py             verify() + capture() methods
-      |-- pam_flow.py              5 verify points
-      |-- meredith_flow.py         3 verify points
-      +-- chrissy_flow.py          5 verify points
+  |   |-- base_flow.py             verify() + capture() methods
+  |   |-- pam_flow.py              5 verify points
+  |   |-- meredith_flow.py         3 verify points + deprecation checks
+  |   |-- chrissy_flow.py          5 verify points
+  |   |-- scope_flow.py            scope isolation + cert flow (standalone)
+  |   |-- rbac_flow.py             RBAC cross-portal (standalone)
+  |   |-- lifecycle_wizard_flow.py lifecycle wizard E2E (standalone, LC-WIZ-01..08)
+  |   |-- layer2_wizard_flow.py    Layer 2 wizard E2E (standalone, L2-WIZ-01..09)
+  |   +-- wizard_session_flow.py   multi-session persistence (standalone, WIZ-SESS-01..04)
+  +-- fixtures/
+      |-- seed.sql                 idempotent test data
+      |-- signal_checker.py        standalone S3 signal scanner
+      |-- artifact_checker.py      standalone S3 artifact checker
+      +-- token_fetcher.py         standalone DB reader for reset tokens
 
-  requirements_reports/            per-run reports                  [NEW]
-  cliRequirements.md               master checklist + docs         [NEW]
-  cliRequirementsDiagram.md        this file                       [NEW]
+  requirements_reports/            per-run reports
+  cliRequirements.md               master checklist + docs
+  cliRequirementsDiagram.md        this file
 ```
 
 ---

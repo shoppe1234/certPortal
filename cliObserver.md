@@ -63,12 +63,17 @@ queue up. If the API is unavailable, screenshots still save to disk.
 | `hitl-queue` | `/hitl-queue` | Human-in-the-loop approval queue (may be empty) |
 | `monica-memory` | `/monica-memory` | Monica orchestrator memory log with pagination |
 
-### Meredith (Retailer) — 3 frames
+### Meredith (Retailer) — 3+ frames
 | Step | URL | What It Captures |
 |------|-----|-----------------|
-| `login` | `/` (post-auth redirect) | Home: stats row, action cards, onboarding banner |
-| `spec-setup` | `/spec-setup` | Spec setup wizard: accordion steps, path tabs |
+| `login` | `/` (post-auth redirect) | Home: stats row, action cards (EDI Configuration, YAML Wizard, Supplier Status) |
+| `spec-setup` | `/spec-setup` | EDI Configuration: wizard entry points (Lifecycle Wizard, Layer 2 Wizard), artifact gallery |
 | `supplier-status` | `/supplier-status` | Supplier certification status table |
+
+> **Note (2026-03-14):** Meredith now has additional pages from the Wizard Refactoring
+> (Lifecycle Wizard, Layer 2 Wizard, Artifact Gallery) that are not yet wired into the
+> observer's capture points. Future observer runs should add captures for:
+> `/lifecycle-wizard`, `/yaml-wizard` (Layer 2 tab), `/artifacts`.
 
 ### Chrissy (Supplier) — 5 frames
 | Step | URL | What It Captures |

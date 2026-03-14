@@ -750,3 +750,87 @@ result = Pipeline(config_path='./pyedi_core/config/config.yaml').run(
 ---
 
 *certPortal EDI Integration Technical Requirements v2.0 — Approved for Claude Code Desktop — 2026-03-06*
+
+---
+
+## Addendum: Wizard Refactoring (2026-03-14)
+
+> This addendum records structural changes made after Sprint 1 completion that affect the TRD's
+> repository structure (§3) and agent descriptions (§1.2). The TRD remains the authoritative
+> Sprint 1 design spec; this addendum extends it for the Wizard Refactoring (ADR-032 through ADR-036).
+
+### Repository Structure Changes
+
+New directories/files added to certPortal since Sprint 1:
+
+```
+certPortal/
+│
+├── certportal/generators/         ← NEW: Wizard Refactoring (Phases A–C)
+│   ├── x12_source.py              ← Dual pyx12/Stedi X12 definition loader
+│   ├── version_registry.py        ← Dynamic X12 version enumeration (4010, 4030, 5010)
+│   ├── template_loader.py         ← Reads partner_registry, presets, lifecycles
+│   ├── lifecycle_builder.py       ← Use/copy/create lifecycle modes
+│   ├── layer2_builder.py          ← Preset + override merge with validation
+│   ├── spec_builder.py            ← Merges Layer 1 + Layer 2 → MD/HTML/PDF artifacts
+│   ├── render_markdown.py         ← Companion guide with Layer 2 annotations
+│   ├── render_html.py             ← Branded HTML (Meredith theme)
+│   ├── render_pdf.py              ← weasyprint/fpdf2 PDF generation
+│   └── artifact_writer.py         ← S3 + DB artifact persistence
+│
+├── edi_framework/
+│   ├── partner_registry.yaml      ← NEW: White-label partner registry (Layer 0)
+│   └── templates/
+│       └── layer2_presets.yaml    ← NEW: Competitive advantage presets (Standard Retail, Minimal, Blank)
+│
+├── static/js/
+│   ├── meredith_wizard.js         ← NEW: Shared wizard step navigation
+│   ├── segment_config.js          ← NEW: Segment accordion + qualifier dropdowns
+│   └── lifecycle_editor.js        ← NEW: State/transition editor with modals
+│
+├── migrations/
+│   ├── 007_wizard_sessions.sql    ← NEW: Multi-session wizard persistence (JSONB)
+│   └── 008_retailer_specs_v2.sql  ← NEW: x12_version, transaction_types, artifacts columns
+│
+├── playwrightcli/flows/
+│   ├── lifecycle_wizard_flow.py   ← NEW: Lifecycle wizard E2E (LC-WIZ-01..08)
+│   ├── layer2_wizard_flow.py      ← NEW: Layer 2 YAML wizard E2E (L2-WIZ-01..09)
+│   └── wizard_session_flow.py     ← NEW: Multi-session persistence E2E (WIZ-SESS-01..04)
+│
+├── playwrightcli/fixtures/
+│   └── artifact_checker.py        ← NEW: Standalone S3 artifact checker (ADR-027)
+│
+└── instructions/
+    └── wizard_refactoring_prompt.md  ← Approved refactoring spec (Phases A–P)
+```
+
+### Andy Path 1 Deprecation (ADR-032)
+
+Section 1.2 described Andy's 3 ingestion paths. As of the Wizard Refactoring:
+
+- **Path 1 — PDF → YAML:** **DEPRECATED.** Route `POST /yaml-wizard/path1` returns 410 Gone. Deferred to TODO.md for re-incorporation with Dwight.
+- **Path 2 — Uploaded YAML → validated + stored:** **UNCHANGED.** Still the runtime gate via `schema_validators/`.
+- **Path 3 — Wizard form → YAML:** **ACTIVE.** Now fed by the Layer 2 YAML Wizard rather than the original simple form.
+
+### Dwight Disconnection (ADR-032)
+
+Dwight agent (`agents/dwight.py`) is no longer triggered by Meredith portal. Route `POST /spec-setup/upload` returns 410 Gone. Dwight's code remains in the codebase for future re-incorporation (see TODO.md).
+
+### Meredith Portal New Routes
+
+| Route | Method | Purpose |
+|---|---|---|
+| `/lifecycle-wizard` | GET | Lifecycle wizard landing (list sessions, start new) |
+| `/lifecycle-wizard/new` | POST | Create new lifecycle wizard session |
+| `/lifecycle-wizard/{session_id}` | GET | Resume wizard at saved step |
+| `/lifecycle-wizard/{session_id}/save-step` | POST | Save step, return next via HTMX |
+| `/lifecycle-wizard/{session_id}/generate` | POST | Finalize lifecycle YAML to S3 |
+| `/yaml-wizard/layer2/new` | POST | Create new Layer 2 wizard session |
+| `/yaml-wizard/layer2/{session_id}` | GET | Resume Layer 2 wizard |
+| `/yaml-wizard/layer2/{session_id}/save-step` | POST | Save Layer 2 step |
+| `/yaml-wizard/layer2/{session_id}/generate` | POST | Finalize Layer 2 YAML to S3 |
+| `/yaml-wizard/layer2/{session_id}/generate-artifacts` | POST | Merge L1+L2 → MD/HTML/PDF |
+| `/artifacts/{retailer_slug}/{filename}` | GET | Direct artifact download |
+| `/artifacts` | GET | Artifact gallery page |
+| `/spec-setup/upload` | POST | **410 Gone** (Dwight deprecated) |
+| `/yaml-wizard/path1` | POST | **410 Gone** (Andy Path 1 deprecated) |
