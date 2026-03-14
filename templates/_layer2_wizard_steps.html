@@ -1,0 +1,287 @@
+{# Layer 2 Wizard — step panels partial (HTMX swap target) #}
+{# Keyboard hint macro — rendered below wizard-nav on every step #}
+{% macro kbd_hints() %}
+<div class="wizard-kbd-hints">
+  <span><kbd>Enter</kbd> Next step</span>
+  <span><kbd>Esc</kbd> Close modal</span>
+</div>
+{% endmacro %}
+
+{# ── Step 0: Preset Selection ── #}
+{% if current_step == 0 %}
+<div class="wizard-step-panel" id="step-0">
+  <h2 class="wizard-step-title">Choose a Preset</h2>
+  <p class="text-muted" style="margin-bottom:1.5rem">Select a starting point for your Layer 2 configuration. You can customize everything in subsequent steps.</p>
+  <form id="step-form">
+    <input type="hidden" name="step_number" value="0">
+    <div class="mode-cards">
+      {% for preset in available_presets %}
+      <label class="mode-card">
+        <input type="radio" name="preset" value="{{ preset.key }}"
+               {% if (state_json.get('preset') or 'standard_retail') == preset.key %}checked{% endif %}>
+        <div class="mode-card-content">
+          <div class="mode-card-title">{{ preset.name }}{% if preset.recommended %} <span class="gate-pill gate-complete" style="font-size:10px">recommended</span>{% endif %}</div>
+          <p class="mode-card-desc text-muted">{{ preset.description }}</p>
+          {% if preset.transaction_count %}
+          <span class="text-muted text-sm">{{ preset.transaction_count }} transaction types covered</span>
+          {% endif %}
+        </div>
+      </label>
+      {% endfor %}
+      {% if not available_presets %}
+      <label class="mode-card">
+        <input type="radio" name="preset" value="standard_retail" checked>
+        <div class="mode-card-content">
+          <div class="mode-card-title">Standard Retail</div>
+          <p class="mode-card-desc text-muted">Pre-configured for general merchandise EDI. Derived from Lowe's transaction patterns.</p>
+        </div>
+      </label>
+      <label class="mode-card">
+        <input type="radio" name="preset" value="minimal">
+        <div class="mode-card-content">
+          <div class="mode-card-title">Minimal</div>
+          <p class="mode-card-desc text-muted">Required segments only. Start lean and add what you need.</p>
+        </div>
+      </label>
+      <label class="mode-card">
+        <input type="radio" name="preset" value="blank">
+        <div class="mode-card-content">
+          <div class="mode-card-title">Blank</div>
+          <p class="mode-card-desc text-muted">Empty configuration. Full manual setup.</p>
+        </div>
+      </label>
+      {% endif %}
+    </div>
+
+    <div class="wizard-nav">
+      <a href="/yaml-wizard" class="btn">&larr; Back to YAML Wizard</a>
+      <button type="button" class="btn btn-primary"
+              hx-post="/yaml-wizard/layer2/{{ session.id }}/save-step"
+              hx-include="#step-form"
+              hx-target="#wizard-content"
+              hx-swap="innerHTML">
+        Next &rarr;
+      </button>
+    </div>
+  </form>
+  {{ kbd_hints() }}
+</div>
+
+{# ── Step 1: Segment Configuration ── #}
+{% elif current_step == 1 %}
+<div class="wizard-step-panel" id="step-1">
+  <h2 class="wizard-step-title">Segment Configuration</h2>
+  <p class="text-muted" style="margin-bottom:1.5rem">Expand any segment to configure element-level overrides. Preset values are pre-filled.</p>
+  <form id="step-form">
+    <input type="hidden" name="step_number" value="1">
+    <input type="hidden" name="segment_overrides" id="segment-overrides-json" value='{{ (state_json.get("segment_overrides") or {}) | tojson }}'>
+
+    {% with seg_fields=mergeable_fields, seg_defs=segments, seg_overrides=state_json.get("segment_overrides", {}) %}
+    {% include "_segment_config.html" %}
+    {% endwith %}
+
+    <div class="wizard-nav">
+      <button type="button" class="btn"
+              hx-post="/yaml-wizard/layer2/{{ session.id }}/save-step"
+              hx-vals='{"step_number": "1", "go_back": "1"}'
+              hx-target="#wizard-content"
+              hx-swap="innerHTML">
+        &larr; Back
+      </button>
+      <button type="button" class="btn btn-primary"
+              hx-post="/yaml-wizard/layer2/{{ session.id }}/save-step"
+              hx-include="#step-form"
+              hx-target="#wizard-content"
+              hx-swap="innerHTML"
+              data-collect="segments">
+        Next &rarr;
+      </button>
+    </div>
+  </form>
+  {{ kbd_hints() }}
+</div>
+
+{# ── Step 2: Business Rules ── #}
+{% elif current_step == 2 %}
+<div class="wizard-step-panel" id="step-2">
+  <h2 class="wizard-step-title">Business Rules</h2>
+  <p class="text-muted" style="margin-bottom:1.5rem">Toggle and configure business rules for this transaction.</p>
+  <form id="step-form">
+    <input type="hidden" name="step_number" value="2">
+    <input type="hidden" name="business_rules" id="business-rules-json" value='{{ (state_json.get("business_rules") or business_rules) | tojson }}'>
+
+    {% with rules=business_rules, user_rules=state_json.get("business_rules") %}
+    {% include "_business_rules.html" %}
+    {% endwith %}
+
+    <div class="wizard-nav">
+      <button type="button" class="btn"
+              hx-post="/yaml-wizard/layer2/{{ session.id }}/save-step"
+              hx-vals='{"step_number": "2", "go_back": "1"}'
+              hx-target="#wizard-content"
+              hx-swap="innerHTML">
+        &larr; Back
+      </button>
+      <button type="button" class="btn btn-primary"
+              hx-post="/yaml-wizard/layer2/{{ session.id }}/save-step"
+              hx-include="#step-form"
+              hx-target="#wizard-content"
+              hx-swap="innerHTML"
+              data-collect="rules">
+        Next &rarr;
+      </button>
+    </div>
+  </form>
+  {{ kbd_hints() }}
+</div>
+
+{# ── Step 3: Mapping Notes ── #}
+{% elif current_step == 3 %}
+<div class="wizard-step-panel" id="step-3">
+  <h2 class="wizard-step-title">Mapping Notes</h2>
+  <p class="text-muted" style="margin-bottom:1.5rem">Reference turnaround mapping pairs for this transaction (e.g. 850 &rarr; 855).</p>
+  <form id="step-form">
+    <input type="hidden" name="step_number" value="3">
+    <input type="hidden" name="mapping_notes" id="mapping-notes-json"
+           value='{{ (state_json.get("mapping_notes") or mapping_refs) | tojson }}'>
+
+    <div class="mapping-notes-editor">
+      {% set current_mappings = state_json.get("mapping_notes") or mapping_refs %}
+      {% if current_mappings %}
+      {% for ref in current_mappings %}
+      <div class="mapping-note-row" style="display:flex;gap:0.75rem;align-items:center;margin-bottom:0.5rem">
+        {% if ref is mapping %}
+        <span class="form-input" style="flex:1;background:var(--color-surface-2)">{{ ref.get("ref", ref) }}</span>
+        {% else %}
+        <span class="form-input" style="flex:1;background:var(--color-surface-2)">{{ ref }}</span>
+        {% endif %}
+      </div>
+      {% endfor %}
+      {% else %}
+      <p class="text-muted">No turnaround mapping references available for this transaction and preset.</p>
+      {% endif %}
+    </div>
+
+    <div class="wizard-nav">
+      <button type="button" class="btn"
+              hx-post="/yaml-wizard/layer2/{{ session.id }}/save-step"
+              hx-vals='{"step_number": "3", "go_back": "1"}'
+              hx-target="#wizard-content"
+              hx-swap="innerHTML">
+        &larr; Back
+      </button>
+      <button type="button" class="btn btn-primary"
+              hx-post="/yaml-wizard/layer2/{{ session.id }}/save-step"
+              hx-include="#step-form"
+              hx-target="#wizard-content"
+              hx-swap="innerHTML">
+        Next &rarr;
+      </button>
+    </div>
+  </form>
+  {{ kbd_hints() }}
+</div>
+
+{# ── Step 4: Review & Generate ── #}
+{% elif current_step == 4 %}
+<div class="wizard-step-panel" id="step-4">
+  <h2 class="wizard-step-title">Review &amp; Generate</h2>
+  <p class="text-muted" style="margin-bottom:1.5rem">Review your Layer 2 configuration and generate the YAML.</p>
+
+  <div class="review-section" style="margin-bottom:1.5rem">
+    <div class="review-row">
+      <span class="review-label">Transaction</span>
+      <span class="review-value">{{ transaction_type }}</span>
+    </div>
+    <div class="review-row">
+      <span class="review-label">X12 Version</span>
+      <span class="review-value">{{ x12_version }}</span>
+    </div>
+    <div class="review-row">
+      <span class="review-label">Preset</span>
+      <span class="review-value">{{ state_json.get('preset', 'standard_retail') | replace('_', ' ') | title }}</span>
+    </div>
+    {% if state_json.get('segment_overrides') %}
+    <div class="review-row">
+      <span class="review-label">Segment Overrides</span>
+      <span class="review-value">{{ state_json.get('segment_overrides', {}).keys() | list | length }} segments customized</span>
+    </div>
+    {% endif %}
+    {% if state_json.get('business_rules') %}
+    <div class="review-row">
+      <span class="review-label">Business Rules</span>
+      <span class="review-value">{{ state_json.get('business_rules', []) | length }} rules configured</span>
+    </div>
+    {% endif %}
+  </div>
+
+  {% if yaml_preview %}
+  <div style="margin-bottom:1.5rem">
+    <h3 style="font-size:15px;font-weight:600;margin-bottom:0.5rem">YAML Preview</h3>
+    <pre class="yaml-preview">{{ yaml_preview }}</pre>
+  </div>
+  {% endif %}
+
+  <div class="wizard-nav">
+    <button type="button" class="btn"
+            hx-post="/yaml-wizard/layer2/{{ session.id }}/save-step"
+            hx-vals='{"step_number": "4", "go_back": "1"}'
+            hx-target="#wizard-content"
+            hx-swap="innerHTML">
+      &larr; Back
+    </button>
+    <button type="button" class="btn btn-success"
+            hx-post="/yaml-wizard/layer2/{{ session.id }}/generate"
+            hx-target="#wizard-content"
+            hx-swap="innerHTML">
+      Generate Layer 2 YAML
+    </button>
+  </div>
+</div>
+
+{# ── Generation result (step 99) ── #}
+{% elif current_step == 99 %}
+<div class="wizard-step-panel">
+  <div class="generation-success">
+    <div class="generation-success-icon">&#10003;</div>
+    <h2 class="wizard-step-title">Layer 2 YAML Generated Successfully</h2>
+    <p class="text-muted" style="margin-bottom:1.5rem">Your Layer 2 YAML has been validated and written to S3.</p>
+    {% if s3_key %}
+    <div class="review-section" style="max-width:600px;margin:0 auto 1.5rem">
+      <div class="review-row">
+        <span class="review-label">S3 Key</span>
+        <span class="review-value text-sm">{{ s3_key }}</span>
+      </div>
+    </div>
+    {% endif %}
+    <p class="text-muted" style="margin-bottom:1rem">Now generate spec artifacts (MD/HTML/PDF) with your Layer 2 configuration baked in.</p>
+    <div class="wizard-nav" style="justify-content:center;border-top:none;padding-top:0">
+      <button type="button" class="btn btn-primary"
+              hx-post="/yaml-wizard/layer2/{{ session.id }}/generate-artifacts"
+              hx-target="#wizard-content"
+              hx-swap="innerHTML">
+        Generate Artifacts (MD / HTML / PDF)
+      </button>
+      <a href="/yaml-wizard" class="btn">&larr; Back to YAML Wizard</a>
+    </div>
+  </div>
+</div>
+
+{# ── Artifacts generated (step 100) ── #}
+{% elif current_step == 100 %}
+<div class="wizard-step-panel">
+  <div class="generation-success">
+    <div class="generation-success-icon">&#10003;</div>
+    <h2 class="wizard-step-title">Artifacts Generated</h2>
+    <p class="text-muted" style="margin-bottom:1.5rem">Spec documents with your Layer 2 configuration are ready for download.</p>
+
+    {% with artifact_tx=transaction_type, artifact_data=artifacts, retailer=session.retailer_slug %}
+    {% include "_artifact_card.html" %}
+    {% endwith %}
+
+    <div class="wizard-nav" style="justify-content:center;border-top:none;padding-top:1rem">
+      <a href="/yaml-wizard" class="btn btn-primary">&larr; Back to YAML Wizard</a>
+    </div>
+  </div>
+</div>
+{% endif %}

@@ -345,6 +345,66 @@ body {
 .yaml-live-preview-header { display: flex; justify-content: space-between; align-items: center; margin-top: 1rem; margin-bottom: 0.5rem; }
 .yaml-live-preview-header h4 { font-size: 13px; font-weight: 600; color: var(--color-text-muted); }
 
+/* ── Wizard page — fit viewport, no scrollbar ────────────────── */
+body:has(.wizard-content) { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+body:has(.wizard-content) .nav { flex-shrink: 0; }
+body:has(.wizard-content) .main-content { flex: 1; overflow-y: auto; padding-top: 1.25rem; padding-bottom: 1rem; scrollbar-width: none; }
+body:has(.wizard-content) .main-content::-webkit-scrollbar { display: none; }
+body:has(.wizard-content) .footer { flex-shrink: 0; margin-top: 0; }
+body:has(.wizard-content) .page-header { margin-bottom: 1rem; }
+body:has(.wizard-content) .wizard-session-bar { margin-bottom: 0.75rem; }
+body:has(.wizard-content) .wizard-steps { margin-bottom: 1.25rem; padding: 0.75rem 1rem; }
+body:has(.wizard-content) .wizard-content { padding: 1.5rem; }
+
+/* ── Loading Spinner (Rec #1) ────────────────────────────────── */
+.btn--loading { position: relative; color: transparent !important; pointer-events: none; }
+.btn--loading::after { content: ''; position: absolute; width: 16px; height: 16px; top: 50%; left: 50%; margin: -8px 0 0 -8px; border: 2px solid rgba(255,255,255,0.3); border-top-color: #fff; border-radius: 50%; animation: btn-spin 0.6s linear infinite; }
+.btn--loading:not(.btn-primary):not(.btn-success)::after { border-color: rgba(26,31,54,0.15); border-top-color: var(--color-primary); }
+@keyframes btn-spin { to { transform: rotate(360deg); } }
+
+/* ── Keyboard Shortcut Hints (Rec #3) ───────────────────────── */
+.wizard-kbd-hints { display: flex; justify-content: center; gap: 1.25rem; margin-top: 0.75rem; font-size: 11px; color: var(--color-text-muted); }
+.wizard-kbd-hints kbd { display: inline-block; padding: 1px 5px; font-family: var(--font-sans); font-size: 10px; background: var(--color-surface-2); border: 1px solid var(--color-border); border-radius: 3px; box-shadow: 0 1px 0 var(--color-border); }
+
+/* ── Auto-save Pill (Rec #4) ────────────────────────────────── */
+.wizard-autosave-pill { display: inline-flex; align-items: center; gap: 0.35rem; padding: 3px 10px; border-radius: 12px; font-size: 11px; font-weight: 500; transition: all 300ms ease; background: var(--color-surface-2); color: var(--color-text-muted); }
+.wizard-autosave-pill--saving { background: var(--color-warn-light); color: #92400e; }
+.wizard-autosave-pill--saved { background: var(--color-success-light); color: #15803d; }
+.wizard-autosave-pill--error { background: #fef2f2; color: var(--color-error); }
+.wizard-autosave-pill .autosave-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.wizard-autosave-pill--saving .autosave-dot { animation: pulse-dot 1s ease infinite; }
+@keyframes pulse-dot { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+/* ── Validation Shake (Rec #5) ──────────────────────────────── */
+.mode-card.field-error .mode-card-content { border-color: var(--color-error); box-shadow: 0 0 0 3px rgba(239,68,68,0.15); }
+.field-error-shake { animation: shake 0.4s ease; }
+@keyframes shake { 0%, 100% { transform: translateX(0); } 20%, 60% { transform: translateX(-4px); } 40%, 80% { transform: translateX(4px); } }
+.checkbox-card.field-error { border-color: var(--color-error); box-shadow: 0 0 0 2px rgba(239,68,68,0.12); }
+
+/* ── Mobile Responsive (Rec #6) ─────────────────────────────── */
+@media (max-width: 640px) {
+  .main-content { padding: 1rem 0.75rem; }
+  .page-title { font-size: 18px; }
+  .page-subtitle { font-size: 12px; }
+  .mode-cards { grid-template-columns: 1fr; }
+  .tx-checkbox-grid { grid-template-columns: 1fr 1fr; }
+  .wizard-content { padding: 1rem; }
+  .wizard-nav { flex-direction: column-reverse; gap: 0.5rem; }
+  .wizard-nav .btn, .wizard-nav .btn-primary, .wizard-nav .btn-success { width: 100%; justify-content: center; }
+  .wizard-session-bar { flex-direction: column; gap: 0.25rem; align-items: flex-start; padding: 0.5rem 0.75rem; }
+  .wizard-kbd-hints { display: none; }
+  .review-row { flex-direction: column; gap: 0.25rem; }
+  .nav { gap: 0.5rem; padding: 0 0.75rem; }
+  .nav-links { display: none; }
+  .nav-user-name { display: none; }
+  .generation-success { padding: 1.5rem 0.5rem; }
+}
+@media (max-width: 480px) {
+  .tx-checkbox-grid { grid-template-columns: 1fr; }
+  .wizard-steps { padding: 0.5rem; }
+  .wizard-step-label { font-size: 11px; }
+}
+
 /* ── Mapping Notes ───────────────────────────────────────────── */
 .mapping-notes-editor { margin-bottom: 1rem; }
 .mapping-note-row { display: flex; gap: 0.75rem; align-items: center; margin-bottom: 0.5rem; }

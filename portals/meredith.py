@@ -1145,7 +1145,7 @@ async def lifecycle_wizard_save_step(
             else:
                 context["editor_states"] = (state_json.get("states_config") or {}).get("states", {})
 
-    return templates.TemplateResponse("meredith_lifecycle_wizard.html", context)
+    return templates.TemplateResponse("_lifecycle_wizard_steps.html", context)
 
 
 @router.post("/lifecycle-wizard/{session_id}/generate", response_class=HTMLResponse)
@@ -1218,7 +1218,7 @@ async def lifecycle_wizard_generate(
     session["state_json"] = state_json
 
     return templates.TemplateResponse(
-        "meredith_lifecycle_wizard.html",
+        "_lifecycle_wizard_steps.html",
         {
             "request": request,
             "portal_name": "meredith",
@@ -1464,7 +1464,7 @@ async def layer2_wizard_save_step(
     session["state_json"] = state_json
 
     context = _build_layer2_context(request, user, session, state_json, new_step)
-    return templates.TemplateResponse("meredith_layer2_wizard.html", context)
+    return templates.TemplateResponse("_layer2_wizard_steps.html", context)
 
 
 @router.post("/yaml-wizard/layer2/{session_id}/generate", response_class=HTMLResponse)
@@ -1537,7 +1537,7 @@ async def layer2_wizard_generate(
     context = _build_layer2_context(request, user, session, state_json, 99)
     context["s3_key"] = full_s3_key
     context["current_step"] = 99
-    return templates.TemplateResponse("meredith_layer2_wizard.html", context)
+    return templates.TemplateResponse("_layer2_wizard_steps.html", context)
 
 
 @router.post("/yaml-wizard/layer2/{session_id}/generate-artifacts", response_class=HTMLResponse)
@@ -1627,7 +1627,7 @@ async def layer2_wizard_generate_artifacts(
     context["current_step"] = 100  # artifacts generated state
     context["artifacts"] = artifact_info
     context["written_keys"] = written_keys
-    return templates.TemplateResponse("meredith_layer2_wizard.html", context)
+    return templates.TemplateResponse("_layer2_wizard_steps.html", context)
 
 
 @router.get("/artifacts", response_class=HTMLResponse)

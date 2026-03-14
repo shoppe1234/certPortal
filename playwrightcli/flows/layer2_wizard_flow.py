@@ -175,7 +175,7 @@ class Layer2WizardFlow:
             const r = await fetch('/yaml-wizard/layer2/{self._session_id}/save-step', {{
                 method: 'POST',
                 headers: {{'Content-Type': 'application/x-www-form-urlencoded'}},
-                body: 'step=0&preset=standard_retail'
+                body: 'step_number=0&preset=standard_retail'
             }});
             return {{ok: r.ok, status: r.status}};
         }}""")
@@ -191,7 +191,7 @@ class Layer2WizardFlow:
             const r = await fetch('/yaml-wizard/layer2/{self._session_id}/save-step', {{
                 method: 'POST',
                 headers: {{'Content-Type': 'application/x-www-form-urlencoded'}},
-                body: 'step=1'
+                body: 'step_number=1'
             }});
             return {{ok: r.ok, status: r.status}};
         }}""")
@@ -204,7 +204,7 @@ class Layer2WizardFlow:
             const r = await fetch('/yaml-wizard/layer2/{self._session_id}/save-step', {{
                 method: 'POST',
                 headers: {{'Content-Type': 'application/x-www-form-urlencoded'}},
-                body: 'step=2'
+                body: 'step_number=2'
             }});
             return {{ok: r.ok, status: r.status}};
         }}""")
@@ -217,7 +217,7 @@ class Layer2WizardFlow:
             const r = await fetch('/yaml-wizard/layer2/{self._session_id}/save-step', {{
                 method: 'POST',
                 headers: {{'Content-Type': 'application/x-www-form-urlencoded'}},
-                body: 'step=3'
+                body: 'step_number=3'
             }});
             return {{ok: r.ok, status: r.status}};
         }}""")
@@ -242,7 +242,8 @@ class Layer2WizardFlow:
                     headers: {{'Content-Type': 'application/x-www-form-urlencoded'}},
                     body: ''
                 }});
-                return {{ok: r.ok, status: r.status}};
+                const html = await r.text();
+                return {{ok: r.ok, status: r.status, html: html}};
             }} catch (e) {{
                 return {{ok: false, status: 0, error: String(e)}};
             }}
@@ -251,7 +252,7 @@ class Layer2WizardFlow:
         if self._verifier:
             status = result.get("status", 0)
             self._verifier.verify_layer2_yaml_valid(
-                "generated" if status == 200 else ""
+                result.get("html", "") if status == 200 else ""
             )
 
     async def _generate_artifacts(self) -> None:

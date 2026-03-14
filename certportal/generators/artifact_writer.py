@@ -4,8 +4,8 @@ Artifact Writer — Writes generated spec artifacts to S3 and updates the DB.
 Uses S3AgentWorkspace from certportal.core.workspace (INV-06 compliant)
 and asyncpg from certportal.core.database (portal async pattern).
 
-S3 path pattern: {retailer_slug}/specs/{x12_version}/{transaction_code}.{ext}
-Example: lowes/specs/004010/850.md
+S3 path pattern: {retailer_slug}/system/specs/{x12_version}/{transaction_code}.{ext}
+Example: lowes/system/specs/004010/850.md
 
 Architecture Decision: AD-9 from wizard refactoring prompt.
 Constraint: INV-06 — All paths scoped to {retailer_slug}/.
@@ -73,7 +73,7 @@ async def write_artifacts(
     Returns:
         List of full S3 keys that were written.
     """
-    workspace = S3AgentWorkspace(retailer_slug=retailer_slug)
+    workspace = S3AgentWorkspace(retailer_slug=retailer_slug, supplier_slug="system")
     written_keys: list[str] = []
 
     for ext, content in artifacts.items():
@@ -188,7 +188,7 @@ async def get_artifact_url(
     Returns:
         Full S3 key if the artifact exists, None otherwise.
     """
-    workspace = S3AgentWorkspace(retailer_slug=retailer_slug)
+    workspace = S3AgentWorkspace(retailer_slug=retailer_slug, supplier_slug="system")
     key = _artifact_s3_key(transaction_type, x12_version, ext)
 
     try:

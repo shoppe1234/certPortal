@@ -35,6 +35,8 @@
     bindKeyboardNav();
     bindSessionNameInput();
     observeAutoSave();
+    bindLoadingSpinner();
+    bindErrorToast();
     updateStepIndicator(_config.currentStep);
   }
 
@@ -46,7 +48,6 @@
       var num = parseInt(el.dataset.step, 10);
       if (isNaN(num)) return;
       var circle = el.querySelector(".wizard-step-circle");
-      var label  = el.querySelector(".wizard-step-label");
 
       el.classList.remove("wizard-step--active", "wizard-step--complete", "wizard-step--pending");
 
@@ -73,21 +74,23 @@
     });
   }
 
-  /* ── Form validation ─────────────────────────────────────────── */
+  /* ── Form validation (Rec #5 — enhanced feedback) ──────────── */
 
   /**
    * validateCurrentStep()
    * Checks all required fields in #step-form. Returns true if valid.
+   * Scrolls to first error and applies shake animation.
    */
   function validateCurrentStep() {
     var form = document.getElementById("step-form");
     if (!form) return true;
 
     var valid = true;
+    var firstError = null;
 
     // Clear previous errors
     form.querySelectorAll(".field-error").forEach(function (el) {
-      el.classList.remove("field-error");
+      el.classList.remove("field-error", "field-error-shake");
     });
     form.querySelectorAll(".field-error-msg").forEach(function (el) {
       el.remove();
@@ -96,11 +99,12 @@
     // Check required inputs
     form.querySelectorAll("input[required], select[required], textarea[required]").forEach(function (inp) {
       if (!inp.value || !inp.value.trim()) {
-        inp.classList.add("field-error");
+        inp.classList.add("field-error", "field-error-shake");
         var msg = document.createElement("div");
         msg.className = "field-error-msg";
         msg.textContent = "This field is required.";
         inp.parentNode.appendChild(msg);
+        if (!firstError) firstError = inp;
         valid = false;
       }
     });
@@ -110,7 +114,8 @@
       var groupName = container.dataset.requiredGroup;
       var checked = form.querySelector('input[name="' + groupName + '"]:checked');
       if (!checked) {
-        container.classList.add("field-error");
+        container.classList.add("field-error", "field-error-shake");
+        if (!firstError) firstError = container;
         valid = false;
       }
     });
@@ -121,18 +126,32 @@
       var anyChecked = txGrid.querySelector('input[type="checkbox"]:checked');
       if (!anyChecked) {
         showFlash("Please select at least one transaction.", "error");
+        // Highlight all checkbox cards
+        txGrid.querySelectorAll(".checkbox-card").forEach(function (card) {
+          card.classList.add("field-error", "field-error-shake");
+        });
+        if (!firstError) firstError = txGrid;
         valid = false;
       }
     }
 
-    // Check radio selection for mode
+    // Check radio selection for mode/preset
     var modeCards = form.querySelector(".mode-cards");
     if (modeCards) {
       var modeChecked = modeCards.querySelector('input[type="radio"]:checked');
       if (!modeChecked) {
-        showFlash("Please select a mode.", "error");
+        showFlash("Please select an option.", "error");
+        modeCards.querySelectorAll(".mode-card").forEach(function (card) {
+          card.classList.add("field-error", "field-error-shake");
+        });
+        if (!firstError) firstError = modeCards;
         valid = false;
       }
+    }
+
+    // Scroll to first error
+    if (firstError) {
+      firstError.scrollIntoView({ behavior: "smooth", block: "center" });
     }
 
     return valid;
@@ -220,14 +239,76 @@
   /* ── Session name input ──────────────────────────────────────── */
 
   function bindSessionNameInput() {
-    var nameInput = document.querySelector('.wizard-session-bar .wizard-session-name');
     // Session name display is read-only in the bar — handled on landing page input
   }
 
-  /* ── Auto-save indicator ─────────────────────────────────────── */
+  /* ── Loading Spinner (Rec #1) ─────────────────────────────── */
+
+  function bindLoadingSpinner() {
+    document.addEventListener("htmx:beforeRequest", function (evt) {
+      var elt = evt.detail.elt;
+      if (!elt || elt.tagName !== "BUTTON") return;
+      // Only spin wizard nav buttons
+      if (!elt.closest(".wizard-nav") && !elt.closest(".generation-success")) return;
+      elt.classList.add("btn--loading");
+      elt.disabled = true;
+    });
+
+    document.addEventListener("htmx:afterRequest", function (evt) {
+      var elt = evt.detail.elt;
+      if (!elt || elt.tagName !== "BUTTON") return;
+      elt.classList.remove("btn--loading");
+      elt.disabled = false;
+    });
+
+    // Also clear spinner on swap error
+    document.addEventListener("htmx:swapError", function (evt) {
+      document.querySelectorAll(".btn--loading").forEach(function (btn) {
+        btn.classList.remove("btn--loading");
+        btn.disabled = false;
+      });
+    });
+  }
+
+  /* ── Error Toast (Rec #2) ─────────────────────────────────── */
+
+  function bindErrorToast() {
+    document.addEventListener("htmx:responseError", function (evt) {
+      var xhr = evt.detail.xhr;
+      var status = xhr ? xhr.status : 0;
+      var msg = "Something went wrong.";
+
+      if (status === 400) {
+        try {
+          var body = JSON.parse(xhr.responseText);
+          msg = body.detail || "Validation error. Please check your inputs.";
+        } catch (e) {
+          msg = "Validation error. Please check your inputs.";
+        }
+      } else if (status === 403) {
+        msg = "Access denied. Your session may have expired.";
+      } else if (status === 404) {
+        msg = "Wizard session not found. It may have been deleted.";
+      } else if (status >= 500) {
+        msg = "Server error. Please try again in a moment.";
+      } else if (status === 0) {
+        msg = "Network error. Check your connection.";
+      }
+
+      showFlash(msg, "error");
+
+      // Remove spinner from all buttons
+      document.querySelectorAll(".btn--loading").forEach(function (btn) {
+        btn.classList.remove("btn--loading");
+        btn.disabled = false;
+      });
+    });
+  }
+
+  /* ── Auto-save indicator (Rec #4 — enhanced pill) ──────────── */
 
   function observeAutoSave() {
-    // Listen for HTMX save-step requests to show "Saving..." / "Saved"
+    // Listen for HTMX save-step requests to show status pill
     document.addEventListener("htmx:beforeRequest", function (evt) {
       var elt = evt.detail.elt;
       if (!elt) return;
@@ -258,14 +339,21 @@
           updateStepIndicator(_config.currentStep);
         }
       }
+
+      // Re-process HTMX attributes in swapped content
+      var target = evt.detail.target;
+      if (target) {
+        htmx.process(target);
+      }
     });
   }
 
   function showAutoSave(state) {
-    var el = document.querySelector(".wizard-autosave");
+    var el = document.querySelector(".wizard-autosave-pill");
     if (!el) {
       el = document.createElement("span");
-      el.className = "wizard-autosave";
+      el.className = "wizard-autosave-pill";
+      el.innerHTML = '<span class="autosave-dot"></span><span class="autosave-text"></span>';
       var bar = document.querySelector(".wizard-session-bar");
       if (bar) {
         bar.appendChild(el);
@@ -274,26 +362,31 @@
       }
     }
 
-    el.classList.remove("wizard-autosave--saving", "wizard-autosave--saved");
+    var textEl = el.querySelector(".autosave-text");
+    el.classList.remove("wizard-autosave-pill--saving", "wizard-autosave-pill--saved", "wizard-autosave-pill--error");
+    el.style.opacity = "1";
 
     if (state === "saving") {
-      el.textContent = "Saving\u2026";
-      el.classList.add("wizard-autosave--saving");
+      el.classList.add("wizard-autosave-pill--saving");
+      if (textEl) textEl.textContent = "Saving\u2026";
     } else if (state === "saved") {
-      el.textContent = "Saved";
-      el.classList.add("wizard-autosave--saved");
+      el.classList.add("wizard-autosave-pill--saved");
+      if (textEl) textEl.textContent = "Progress saved";
       setTimeout(function () {
+        el.style.transition = "opacity 600ms ease";
         el.style.opacity = "0";
         setTimeout(function () {
-          el.textContent = "";
-          el.style.opacity = "1";
-        }, 300);
-      }, 2000);
+          el.style.transition = "";
+        }, 600);
+      }, 3000);
     } else {
-      el.textContent = "Save failed";
-      el.style.color = "var(--color-error)";
+      el.classList.add("wizard-autosave-pill--error");
+      if (textEl) textEl.textContent = "Save failed";
     }
   }
+
+  // Keep old showAutoSave name for backwards compat (htmx_helpers may reference)
+  // but use new pill version
 
   /* ── Flash helper (reuse from htmx_helpers if available) ────── */
 

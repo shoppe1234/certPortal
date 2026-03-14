@@ -172,7 +172,7 @@ class LifecycleWizardFlow:
             const r = await fetch('/lifecycle-wizard/{self._session_id}/save-step', {{
                 method: 'POST',
                 headers: {{'Content-Type': 'application/x-www-form-urlencoded'}},
-                body: 'step=0&mode=use'
+                body: 'step_number=0&mode=use&lifecycle_ref=lifecycle/order_to_cash.yaml'
             }});
             return {{ok: r.ok, status: r.status}};
         }}""")
@@ -189,7 +189,7 @@ class LifecycleWizardFlow:
             const r = await fetch('/lifecycle-wizard/{self._session_id}/save-step', {{
                 method: 'POST',
                 headers: {{'Content-Type': 'application/x-www-form-urlencoded'}},
-                body: 'step=1&x12_version=004010'
+                body: 'step_number=1&x12_version=004010'
             }});
             return {{ok: r.ok, status: r.status}};
         }}""")
@@ -205,7 +205,7 @@ class LifecycleWizardFlow:
             const r = await fetch('/lifecycle-wizard/{self._session_id}/save-step', {{
                 method: 'POST',
                 headers: {{'Content-Type': 'application/x-www-form-urlencoded'}},
-                body: 'step=2&transactions=850&transactions=855&transactions=856&transactions=810'
+                body: 'step_number=2&transactions=850&transactions=855&transactions=856&transactions=810'
             }});
             return {{ok: r.ok, status: r.status}};
         }}""")
@@ -220,7 +220,7 @@ class LifecycleWizardFlow:
             const r = await fetch('/lifecycle-wizard/{self._session_id}/save-step', {{
                 method: 'POST',
                 headers: {{'Content-Type': 'application/x-www-form-urlencoded'}},
-                body: 'step=3'
+                body: 'step_number=3'
             }});
             return {{ok: r.ok, status: r.status}};
         }}""")

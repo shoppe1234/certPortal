@@ -25,6 +25,8 @@ document.addEventListener("DOMContentLoaded", function () {
 document.addEventListener("htmx:beforeRequest", function (evt) {
   var btn = evt.detail.elt;
   if (btn && btn.tagName === "BUTTON") {
+    // Skip wizard buttons — handled by meredith_wizard.js spinner
+    if (btn.closest(".wizard-nav") || btn.closest(".generation-success")) return;
     btn.disabled = true;
     btn.dataset.originalText = btn.textContent;
     btn.textContent = "…";
@@ -41,6 +43,9 @@ document.addEventListener("htmx:afterRequest", function (evt) {
 });
 
 document.addEventListener("htmx:responseError", function (evt) {
+  // Skip wizard buttons — handled by meredith_wizard.js error toast
+  var elt = evt.detail.elt;
+  if (elt && (elt.closest(".wizard-nav") || elt.closest(".generation-success"))) return;
   var msg = "Request failed: " + evt.detail.xhr.status;
   try {
     var body = JSON.parse(evt.detail.xhr.responseText);
