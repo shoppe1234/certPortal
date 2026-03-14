@@ -1,0 +1,79 @@
+# =============================================================================
+# PARTNER REGISTRY — Layer 0 White-Label Foundation
+# =============================================================================
+# This is the top-level registry of all supported trading partners.
+# Each entry references a partner-specific master YAML and declares which
+# X12 versions and transaction sets are available for that partner.
+#
+# Adding a new partner:
+#   1. Create a {partner}_master.yaml in edi_framework/
+#   2. Add an entry below with the partner's slug, name, and capabilities
+#   3. No code changes required — the wizard reads this file at startup
+#
+# Architecture (AD-7 from wizard refactoring):
+#   partner_registry.yaml    <- you are here (Layer 0)
+#   ├── lowes_master.yaml    <- Lowe's partner config (Layer 1)
+#   ├── transactions/        <- per-document schemas
+#   ├── mappings/            <- turnaround rules
+#   └── lifecycle/           <- state machine definitions
+# =============================================================================
+
+partners:
+
+  lowes:
+    name: "Lowe's Companies, Inc."
+    slug: "lowes"
+    master_ref: "lowes_master.yaml"
+    x12_versions:
+      - "004010"
+    transaction_sets:
+      - id: "850"
+        name: "Purchase Order"
+        direction: "inbound"
+        functional_group: "PO"
+      - id: "855"
+        name: "PO Acknowledgment"
+        direction: "outbound"
+        functional_group: "PR"
+      - id: "856"
+        name: "Advance Ship Notice"
+        direction: "outbound"
+        functional_group: "SH"
+      - id: "860"
+        name: "PO Change Request"
+        direction: "inbound"
+        functional_group: "PC"
+      - id: "865"
+        name: "PO Change Acknowledgment"
+        direction: "outbound"
+        functional_group: "PC"
+      - id: "810"
+        name: "Invoice"
+        direction: "outbound"
+        functional_group: "IN"
+    lifecycle_ref: "lifecycle/order_to_cash.yaml"
+    default_preset: "standard_retail"
+    description: >
+      Lowe's Companies, Inc. — full order-to-cash lifecycle.
+      6 transaction types covering PO, acknowledgment, change management,
+      shipping, and invoicing. X12 4010 only.
+
+# =============================================================================
+# TEMPLATE: Copy this block to add a new partner
+# =============================================================================
+# new_partner:
+#   name: "Partner Display Name"
+#   slug: "new_partner"
+#   master_ref: "new_partner_master.yaml"
+#   x12_versions:
+#     - "004010"
+#     - "005010"
+#   transaction_sets:
+#     - id: "850"
+#       name: "Purchase Order"
+#       direction: "inbound"
+#       functional_group: "PO"
+#   lifecycle_ref: "lifecycle/custom_lifecycle.yaml"
+#   default_preset: "standard_retail"
+#   description: >
+#     Description of the partner's EDI capabilities.
