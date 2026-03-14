@@ -10,6 +10,7 @@ Auth (ADR-014): JWT cookie or Bearer header. Role required: 'admin' or 'retailer
 from __future__ import annotations
 
 import asyncio
+import io
 import json
 import time
 from contextlib import asynccontextmanager
@@ -19,7 +20,7 @@ from typing import Annotated
 
 import asyncpg
 from fastapi import APIRouter, Cookie, Depends, FastAPI, Form, HTTPException, Request, status
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -49,13 +50,23 @@ from certportal.core.workspace import S3AgentWorkspace
 
 from certportal.generators.template_loader import (
     load_available_lifecycles,
+    load_available_presets,
     load_lifecycle_detail,
+    load_preset_for_transaction,
 )
 from certportal.generators.lifecycle_builder import build_lifecycle, validate_lifecycle
+from certportal.generators.layer2_builder import (
+    build_layer2,
+    get_mergeable_fields,
+    validate_layer2,
+)
+from certportal.generators.spec_builder import build_spec, generate_artifacts
+from certportal.generators.artifact_writer import write_artifacts, update_retailer_specs
 from certportal.generators.version_registry import (
     get_available_versions,
     get_transaction_sets_for_version,
 )
+from certportal.generators.x12_source import get_segments
 
 BASE_DIR = Path(__file__).parent.parent
 
@@ -508,7 +519,10 @@ async def yaml_wizard(
     conn=Depends(get_connection),
     user: dict = Depends(get_current_user),
 ):
+    """E1 — Refactored YAML wizard landing: Layer 2 Wizard (primary) + Upload YAML."""
     retailer_slug = user.get("retailer_slug")
+
+    # Fetch retailer specs for the Upload YAML tab
     if retailer_slug:
         specs = await conn.fetch(
             "SELECT retailer_slug, spec_version FROM retailer_specs WHERE retailer_slug = $1 ORDER BY created_at DESC",
@@ -518,6 +532,24 @@ async def yaml_wizard(
         specs = await conn.fetch(
             "SELECT retailer_slug, spec_version FROM retailer_specs ORDER BY created_at DESC"
         )
+
+    # Fetch active Layer 2 wizard sessions for the session list
+    if retailer_slug:
+        layer2_sessions = await conn.fetch(
+            "SELECT id, session_name, step_number, state_json, x12_version, created_at, updated_at "
+            "FROM wizard_sessions "
+            "WHERE retailer_slug = $1 AND wizard_type = 'layer2' AND completed_at IS NULL "
+            "ORDER BY updated_at DESC",
+            retailer_slug,
+        )
+    else:
+        layer2_sessions = await conn.fetch(
+            "SELECT id, session_name, step_number, state_json, x12_version, created_at, updated_at "
+            "FROM wizard_sessions "
+            "WHERE wizard_type = 'layer2' AND completed_at IS NULL "
+            "ORDER BY updated_at DESC",
+        )
+
     return templates.TemplateResponse(
         "meredith_yaml_wizard.html",
         {
@@ -525,6 +557,8 @@ async def yaml_wizard(
             "portal_name": "meredith",
             "current_user": user,
             "specs": [dict(s) for s in specs],
+            "layer2_sessions": [dict(r) for r in layer2_sessions],
+            "available_versions": get_available_versions(),
             "supported_bundles": {
                 "general_merchandise": ["850", "855", "856", "810", "997"],
                 "transportation": ["204", "990", "210", "214"],
@@ -1167,6 +1201,452 @@ async def lifecycle_wizard_generate(
             "lifecycle_states": {},
             "editor_states": {},
         },
+    )
+
+
+# ---------------------------------------------------------------------------
+# Protected: Layer 2 YAML Wizard (Wizard 2) — E2–E7
+# ---------------------------------------------------------------------------
+
+
+@router.post("/yaml-wizard/layer2/new")
+async def layer2_wizard_new(
+    request: Request,
+    conn=Depends(get_connection),
+    user: dict = Depends(get_current_user),
+    transaction_type: str = Form("850"),
+    x12_version: str = Form("004010"),
+    session_name: str = Form(""),
+):
+    """E2 — Create new Layer 2 wizard session. Redirect to session page."""
+    retailer_slug = user.get("retailer_slug") or "admin"
+    initial_state = {
+        "transaction_type": transaction_type,
+        "x12_version": x12_version,
+    }
+    row = await conn.fetchrow(
+        "INSERT INTO wizard_sessions (retailer_slug, wizard_type, session_name, step_number, state_json, x12_version) "
+        "VALUES ($1, 'layer2', $2, 0, $3, $4) "
+        "RETURNING id",
+        retailer_slug,
+        session_name or f"{transaction_type} Layer 2",
+        json.dumps(initial_state),
+        x12_version,
+    )
+    session_id = row["id"]
+    return RedirectResponse(url=f"/yaml-wizard/layer2/{session_id}", status_code=302)
+
+
+def _build_layer2_context(
+    request: Request,
+    user: dict,
+    session: dict,
+    state_json: dict,
+    current_step: int,
+) -> dict:
+    """Build template context for the Layer 2 wizard based on current step."""
+    transaction_type = state_json.get("transaction_type", "850")
+    x12_version = state_json.get("x12_version", "004010")
+
+    context = {
+        "request": request,
+        "portal_name": "meredith",
+        "current_user": user,
+        "session": session,
+        "current_step": current_step,
+        "state_json": state_json,
+        "transaction_type": transaction_type,
+        "x12_version": x12_version,
+        "available_presets": [],
+        "segments": [],
+        "mergeable_fields": {},
+        "business_rules": [],
+        "mapping_refs": [],
+        "yaml_preview": "",
+        "artifacts": {},
+        "s3_key": "",
+    }
+
+    if current_step == 0:
+        context["available_presets"] = load_available_presets()
+    elif current_step == 1:
+        preset_name = state_json.get("preset", "standard_retail")
+        context["mergeable_fields"] = get_mergeable_fields(transaction_type, preset_name)
+        context["segments"] = get_segments(transaction_type, x12_version)
+    elif current_step == 2:
+        preset_name = state_json.get("preset", "standard_retail")
+        preset_data = load_preset_for_transaction(preset_name, transaction_type)
+        context["business_rules"] = preset_data.get("business_rules", [])
+        # Merge with user overrides if present
+        user_rules = state_json.get("business_rules")
+        if user_rules is not None:
+            context["business_rules"] = user_rules
+    elif current_step == 3:
+        preset_name = state_json.get("preset", "standard_retail")
+        preset_data = load_preset_for_transaction(preset_name, transaction_type)
+        context["mapping_refs"] = preset_data.get("mapping_refs", [])
+        user_mappings = state_json.get("mapping_notes")
+        if user_mappings is not None:
+            context["mapping_refs"] = user_mappings
+    elif current_step == 4:
+        # Generate YAML preview
+        overrides = _assemble_layer2_overrides(state_json)
+        try:
+            yaml_str = build_layer2(
+                transaction_type=transaction_type,
+                x12_version=x12_version,
+                preset_name=state_json.get("preset", "standard_retail"),
+                overrides=overrides,
+            )
+            context["yaml_preview"] = yaml_str
+        except Exception as exc:
+            context["yaml_preview"] = f"# Error generating preview: {exc}"
+
+    return context
+
+
+def _assemble_layer2_overrides(state_json: dict) -> dict:
+    """Assemble overrides dict from accumulated wizard state."""
+    overrides: dict = {}
+
+    # Segment overrides from step 1
+    seg_overrides = state_json.get("segment_overrides")
+    if seg_overrides and isinstance(seg_overrides, dict):
+        overrides["segments"] = seg_overrides
+
+    # Business rules from step 2
+    biz_rules = state_json.get("business_rules")
+    if biz_rules is not None:
+        overrides["business_rules"] = biz_rules
+
+    # Mapping notes from step 3
+    mapping_notes = state_json.get("mapping_notes")
+    if mapping_notes is not None:
+        overrides["mapping_refs"] = mapping_notes
+
+    return overrides
+
+
+@router.get("/yaml-wizard/layer2/{session_id}", response_class=HTMLResponse)
+async def layer2_wizard_session(
+    request: Request,
+    session_id: str,
+    conn=Depends(get_connection),
+    user: dict = Depends(get_current_user),
+):
+    """E3 — Load/resume Layer 2 wizard session. Render at correct step."""
+    row = await conn.fetchrow(
+        "SELECT id, retailer_slug, session_name, step_number, state_json, "
+        "x12_version, created_at, updated_at, completed_at "
+        "FROM wizard_sessions WHERE id = $1",
+        session_id,
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Wizard session not found")
+
+    # Scope check (INV-06)
+    user_retailer = user.get("retailer_slug")
+    if user_retailer and row["retailer_slug"] != user_retailer:
+        raise HTTPException(status_code=403, detail="Session not in your tenant")
+
+    session = dict(row)
+    state_json = session.get("state_json") or {}
+    if isinstance(state_json, str):
+        state_json = json.loads(state_json)
+    current_step = session["step_number"]
+
+    context = _build_layer2_context(request, user, session, state_json, current_step)
+    return templates.TemplateResponse("meredith_layer2_wizard.html", context)
+
+
+@router.post("/yaml-wizard/layer2/{session_id}/save-step", response_class=HTMLResponse)
+async def layer2_wizard_save_step(
+    request: Request,
+    session_id: str,
+    conn=Depends(get_connection),
+    user: dict = Depends(get_current_user),
+):
+    """E4 — Save step data and return HTMX partial for next step."""
+    row = await conn.fetchrow(
+        "SELECT id, retailer_slug, session_name, step_number, state_json, "
+        "x12_version, created_at, updated_at, completed_at "
+        "FROM wizard_sessions WHERE id = $1",
+        session_id,
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Wizard session not found")
+
+    user_retailer = user.get("retailer_slug")
+    if user_retailer and row["retailer_slug"] != user_retailer:
+        raise HTTPException(status_code=403, detail="Session not in your tenant")
+
+    session = dict(row)
+    state_json = session.get("state_json") or {}
+    if isinstance(state_json, str):
+        state_json = json.loads(state_json)
+
+    form = await request.form()
+    step_number = int(form.get("step_number", "0"))
+    go_back = form.get("go_back")
+
+    if go_back:
+        new_step = max(0, step_number - 1)
+    else:
+        # Save step data
+        if step_number == 0:
+            state_json["preset"] = form.get("preset", "standard_retail")
+        elif step_number == 1:
+            # Segment overrides — expect JSON string from the form
+            seg_json_str = form.get("segment_overrides", "{}")
+            try:
+                state_json["segment_overrides"] = json.loads(seg_json_str)
+            except (json.JSONDecodeError, TypeError):
+                state_json["segment_overrides"] = {}
+        elif step_number == 2:
+            # Business rules — expect JSON string from the form
+            rules_json_str = form.get("business_rules", "[]")
+            try:
+                state_json["business_rules"] = json.loads(rules_json_str)
+            except (json.JSONDecodeError, TypeError):
+                state_json["business_rules"] = []
+        elif step_number == 3:
+            # Mapping notes
+            notes_json_str = form.get("mapping_notes", "[]")
+            try:
+                state_json["mapping_notes"] = json.loads(notes_json_str)
+            except (json.JSONDecodeError, TypeError):
+                state_json["mapping_notes"] = []
+
+        new_step = step_number + 1
+
+    # Update DB
+    await conn.execute(
+        "UPDATE wizard_sessions SET step_number = $1, state_json = $2, "
+        "updated_at = NOW() WHERE id = $3",
+        new_step,
+        json.dumps(state_json),
+        session_id,
+    )
+
+    session["step_number"] = new_step
+    session["state_json"] = state_json
+
+    context = _build_layer2_context(request, user, session, state_json, new_step)
+    return templates.TemplateResponse("meredith_layer2_wizard.html", context)
+
+
+@router.post("/yaml-wizard/layer2/{session_id}/generate", response_class=HTMLResponse)
+async def layer2_wizard_generate(
+    request: Request,
+    session_id: str,
+    conn=Depends(get_connection),
+    user: dict = Depends(get_current_user),
+):
+    """E5 — Finalize: build Layer 2 YAML, validate, write to S3, mark complete."""
+    row = await conn.fetchrow(
+        "SELECT id, retailer_slug, session_name, step_number, state_json, "
+        "x12_version, created_at, updated_at, completed_at "
+        "FROM wizard_sessions WHERE id = $1",
+        session_id,
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Wizard session not found")
+
+    user_retailer = user.get("retailer_slug")
+    if user_retailer and row["retailer_slug"] != user_retailer:
+        raise HTTPException(status_code=403, detail="Session not in your tenant")
+
+    session = dict(row)
+    state_json = session.get("state_json") or {}
+    if isinstance(state_json, str):
+        state_json = json.loads(state_json)
+
+    transaction_type = state_json.get("transaction_type", "850")
+    x12_version = state_json.get("x12_version", "004010")
+    preset_name = state_json.get("preset", "standard_retail")
+    overrides = _assemble_layer2_overrides(state_json)
+
+    # Build Layer 2 YAML
+    try:
+        layer2_yaml = build_layer2(
+            transaction_type=transaction_type,
+            x12_version=x12_version,
+            preset_name=preset_name,
+            overrides=overrides,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Layer 2 build error: {exc}")
+
+    # Validate (strict)
+    errors = validate_layer2(layer2_yaml)
+    if errors:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Layer 2 validation failed: {'; '.join(errors)}",
+        )
+
+    # Write to S3
+    retailer_slug = session["retailer_slug"]
+    ws = S3AgentWorkspace(retailer_slug, "system")
+    s3_key = f"maps/{x12_version}/{transaction_type}.yaml"
+    ws.upload(s3_key, layer2_yaml)
+    full_s3_key = f"{retailer_slug}/{s3_key}"
+
+    # Mark session complete
+    await conn.execute(
+        "UPDATE wizard_sessions SET step_number = 99, completed_at = NOW(), "
+        "updated_at = NOW() WHERE id = $1",
+        session_id,
+    )
+
+    session["step_number"] = 99
+    session["state_json"] = state_json
+
+    context = _build_layer2_context(request, user, session, state_json, 99)
+    context["s3_key"] = full_s3_key
+    context["current_step"] = 99
+    return templates.TemplateResponse("meredith_layer2_wizard.html", context)
+
+
+@router.post("/yaml-wizard/layer2/{session_id}/generate-artifacts", response_class=HTMLResponse)
+async def layer2_wizard_generate_artifacts(
+    request: Request,
+    session_id: str,
+    conn=Depends(get_connection),
+    user: dict = Depends(get_current_user),
+):
+    """E6 — After Layer 2 finalized: merge Layer 1 + Layer 2, generate artifacts."""
+    row = await conn.fetchrow(
+        "SELECT id, retailer_slug, session_name, step_number, state_json, "
+        "x12_version, created_at, updated_at, completed_at "
+        "FROM wizard_sessions WHERE id = $1",
+        session_id,
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Wizard session not found")
+
+    user_retailer = user.get("retailer_slug")
+    if user_retailer and row["retailer_slug"] != user_retailer:
+        raise HTTPException(status_code=403, detail="Session not in your tenant")
+
+    session = dict(row)
+    state_json = session.get("state_json") or {}
+    if isinstance(state_json, str):
+        state_json = json.loads(state_json)
+
+    transaction_type = state_json.get("transaction_type", "850")
+    x12_version = state_json.get("x12_version", "004010")
+    retailer_slug = session["retailer_slug"]
+
+    # Build layer2_config from state
+    overrides = _assemble_layer2_overrides(state_json)
+    preset_name = state_json.get("preset", "standard_retail")
+    preset_data = load_preset_for_transaction(preset_name, transaction_type)
+    # Deep merge preset with overrides for the full layer2 config
+    layer2_config = preset_data
+    if overrides.get("segments"):
+        from certportal.generators.layer2_builder import _deep_merge
+        layer2_config["segments"] = _deep_merge(
+            layer2_config.get("segments", {}),
+            overrides["segments"],
+        )
+    if overrides.get("business_rules"):
+        layer2_config["business_rules"] = overrides["business_rules"]
+    if overrides.get("mapping_refs"):
+        layer2_config["mapping_refs"] = overrides["mapping_refs"]
+
+    # Build merged spec (Layer 1 + Layer 2)
+    merged_spec = build_spec(
+        transaction_type=transaction_type,
+        x12_version=x12_version,
+        layer2_config=layer2_config,
+        retailer_name=retailer_slug,
+    )
+
+    # Generate artifacts (MD/HTML/PDF)
+    artifacts = generate_artifacts(merged_spec, output_formats=("md", "html", "pdf"))
+
+    # Write to S3
+    written_keys = await write_artifacts(
+        retailer_slug=retailer_slug,
+        transaction_type=transaction_type,
+        x12_version=x12_version,
+        artifacts=artifacts,
+    )
+
+    # Update retailer_specs DB
+    await update_retailer_specs(
+        retailer_slug=retailer_slug,
+        x12_version=x12_version,
+        transaction_types=[transaction_type],
+    )
+
+    # Build artifact info for display
+    artifact_info = {}
+    for ext in ("md", "html", "pdf"):
+        if ext in artifacts:
+            artifact_info[ext] = {
+                "size": len(artifacts[ext]),
+                "url": f"/artifacts/{retailer_slug}/{transaction_type}.{ext}",
+            }
+
+    session["state_json"] = state_json
+    context = _build_layer2_context(request, user, session, state_json, 100)
+    context["current_step"] = 100  # artifacts generated state
+    context["artifacts"] = artifact_info
+    context["written_keys"] = written_keys
+    return templates.TemplateResponse("meredith_layer2_wizard.html", context)
+
+
+@router.get("/artifacts/{retailer_slug}/{filename}", response_class=StreamingResponse)
+async def artifact_download(
+    request: Request,
+    retailer_slug: str,
+    filename: str,
+    user: dict = Depends(get_current_user),
+):
+    """E7 — Direct artifact download. Reads from S3 and streams to browser."""
+    # Scope check: retailer_slug must match current user
+    user_retailer = user.get("retailer_slug")
+    if user_retailer and retailer_slug != user_retailer:
+        raise HTTPException(status_code=403, detail="Access denied to this retailer's artifacts")
+
+    # Parse filename: e.g. "850.md", "855.html", "810.pdf"
+    if "." not in filename:
+        raise HTTPException(status_code=400, detail="Invalid filename format. Expected: {tx_code}.{ext}")
+    tx_code, ext = filename.rsplit(".", 1)
+    if ext not in ("md", "html", "pdf"):
+        raise HTTPException(status_code=400, detail="Unsupported format. Use: md, html, pdf")
+
+    # Find the artifact in S3 — scan known X12 versions
+    ws = S3AgentWorkspace(retailer_slug, "system")
+    content = None
+    for ver in ("004010", "004030", "005010"):
+        key = f"specs/{ver}/{tx_code}.{ext}"
+        try:
+            data = ws.download(key)
+            if data is not None:
+                content = data
+                break
+        except Exception:
+            continue
+
+    if content is None:
+        raise HTTPException(status_code=404, detail="Artifact not found")
+
+    content_types = {
+        "md": "text/markdown; charset=utf-8",
+        "html": "text/html; charset=utf-8",
+        "pdf": "application/pdf",
+    }
+
+    if isinstance(content, str):
+        content = content.encode("utf-8")
+
+    return StreamingResponse(
+        io.BytesIO(content),
+        media_type=content_types.get(ext, "application/octet-stream"),
+        headers={"Content-Disposition": f'inline; filename="{filename}"'},
     )
 
 

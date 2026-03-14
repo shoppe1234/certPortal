@@ -1,0 +1,139 @@
+{# _segment_config.html — Per-segment element configuration partial.
+   Accepts:
+     seg_fields: dict from get_mergeable_fields() — {segments: {SEG: {elements: {...}, ...}}, ...}
+     seg_defs: list of SegmentDef from x12_source.get_segments()
+     seg_overrides: dict of user overrides from state_json (segment_overrides)
+#}
+<div class="segment-config-list">
+  {% if seg_fields and seg_fields.segments %}
+    {% for seg_id, seg_info in seg_fields.segments.items() %}
+    <div class="seg-accordion">
+      <div class="seg-accordion-header">
+        <span class="seg-arrow">&#9654;</span>
+        <span class="seg-id">{{ seg_id }}</span>
+        <span class="seg-name text-muted">
+          {%- for sd in (seg_defs or []) if sd.id == seg_id -%}
+            {{ sd.name }}
+          {%- endfor -%}
+        </span>
+        <span class="text-muted text-sm" style="margin-left:auto">
+          {{ seg_info.elements | length }} element{{ 's' if seg_info.elements | length != 1 else '' }}
+          {% if seg_info.has_instances %} &middot; {{ seg_info.instance_count }} instance{{ 's' if seg_info.instance_count != 1 else '' }}{% endif %}
+        </span>
+      </div>
+      <div class="seg-accordion-body hidden">
+        <table class="data-table seg-element-table">
+          <thead>
+            <tr>
+              <th>Element</th>
+              <th>Required</th>
+              <th>Qualifier / Value</th>
+              <th>Constraint</th>
+              <th>Notes</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for elem_id, elem_info in seg_info.elements.items() %}
+            {% set user_elem = (seg_overrides.get(seg_id, {}).get('elements', {}).get(elem_id, {})) if seg_overrides else {} %}
+            <tr class="seg-element-row" data-segment="{{ seg_id }}" data-element="{{ elem_id }}">
+              <td>
+                <span class="font-medium">{{ elem_id }}</span>
+                {% if elem_info.is_override is defined and elem_info.is_override %}
+                <span class="gate-pill gate-certified" style="font-size:9px;margin-left:4px">override</span>
+                {% endif %}
+              </td>
+              <td>
+                <input type="checkbox" class="elem-required"
+                       {% if user_elem.get('required', true) %}checked{% endif %}>
+              </td>
+              <td>
+                {% if elem_info.allowed_codes %}
+                <select class="form-select elem-qualifier" style="min-width:120px">
+                  <option value="">-- select --</option>
+                  {% for code in elem_info.allowed_codes %}
+                  <option value="{{ code }}"
+                          {% if (user_elem.get('qualifier') or elem_info.qualifier or '') == code %}selected{% endif %}>
+                    {{ code }}
+                  </option>
+                  {% endfor %}
+                </select>
+                {% else %}
+                <input type="text" class="form-input elem-qualifier" style="max-width:160px"
+                       value="{{ user_elem.get('qualifier') or elem_info.qualifier or '' }}"
+                       placeholder="{{ elem_info.qualifier or '' }}">
+                {% endif %}
+              </td>
+              <td class="text-sm text-muted">
+                {% if elem_info.constraints %}
+                  {{ elem_info.constraints }}
+                {% elif elem_info.format %}
+                  {{ elem_info.format }}
+                {% elif elem_info.codelist_ref %}
+                  ref: {{ elem_info.codelist_ref }}
+                {% else %}
+                  &mdash;
+                {% endif %}
+              </td>
+              <td>
+                <input type="text" class="form-input elem-note" style="max-width:200px"
+                       value="{{ user_elem.get('note') or elem_info.note or '' }}"
+                       placeholder="Retailer note">
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    {% endfor %}
+  {% elif seg_defs %}
+    {# Fallback: show segments from x12_source when no preset data #}
+    {% for sd in seg_defs %}
+    <div class="seg-accordion">
+      <div class="seg-accordion-header">
+        <span class="seg-arrow">&#9654;</span>
+        <span class="seg-id">{{ sd.id }}</span>
+        <span class="seg-name text-muted">{{ sd.name }}</span>
+        <span class="text-muted text-sm" style="margin-left:auto">
+          {{ sd.elements | length }} element{{ 's' if sd.elements | length != 1 else '' }}
+        </span>
+      </div>
+      <div class="seg-accordion-body hidden">
+        <table class="data-table seg-element-table">
+          <thead>
+            <tr>
+              <th>Element</th>
+              <th>Req</th>
+              <th>Qualifier / Value</th>
+              <th>Type</th>
+              <th>Notes</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for elem in sd.elements %}
+            <tr class="seg-element-row" data-segment="{{ sd.id }}" data-element="{{ elem.ref }}">
+              <td><span class="font-medium">{{ elem.ref }}</span> <span class="text-muted text-sm">{{ elem.name }}</span></td>
+              <td>
+                <input type="checkbox" class="elem-required"
+                       {% if elem.requirement == 'M' %}checked{% endif %}>
+              </td>
+              <td>
+                <input type="text" class="form-input elem-qualifier" style="max-width:160px"
+                       value="" placeholder="qualifier">
+              </td>
+              <td class="text-sm text-muted">{{ elem.data_type }} ({{ elem.min_length }}-{{ elem.max_length }})</td>
+              <td>
+                <input type="text" class="form-input elem-note" style="max-width:200px"
+                       value="" placeholder="Retailer note">
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    {% endfor %}
+  {% else %}
+    <p class="text-muted">No segment definitions available for this transaction and X12 version.</p>
+  {% endif %}
+</div>

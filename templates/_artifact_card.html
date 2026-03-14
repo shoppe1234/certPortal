@@ -1,0 +1,49 @@
+{# _artifact_card.html — Generated artifact card per transaction.
+   Accepts:
+     artifact_tx: str — transaction type code (e.g. "850")
+     artifact_data: dict — {ext: {"size": int, "url": str}} for each format
+     retailer: str — retailer_slug for download links
+#}
+<div class="artifact-card">
+  <div class="artifact-card-header">
+    <div class="artifact-card-title">
+      <span class="artifact-tx-code">{{ artifact_tx }}</span>
+      <span class="artifact-tx-name text-muted">
+        {% if artifact_tx == '850' %}Purchase Order
+        {% elif artifact_tx == '855' %}PO Acknowledgment
+        {% elif artifact_tx == '856' %}Ship Notice/Manifest
+        {% elif artifact_tx == '860' %}PO Change Request
+        {% elif artifact_tx == '865' %}PO Change Acknowledgment
+        {% elif artifact_tx == '810' %}Invoice
+        {% else %}Transaction {{ artifact_tx }}
+        {% endif %}
+      </span>
+    </div>
+    <span class="gate-pill gate-complete">Layer 2 Applied</span>
+  </div>
+  <div class="artifact-card-body">
+    <div class="artifact-downloads">
+      {% if artifact_data and artifact_data.get('md') %}
+      <a href="{{ artifact_data.md.url }}" class="btn btn-sm" target="_blank" title="Download Markdown">
+        <span class="artifact-dl-icon">&#8615;</span> MD
+        <span class="text-muted text-sm">({{ (artifact_data.md.size / 1024) | round(1) }}KB)</span>
+      </a>
+      {% endif %}
+      {% if artifact_data and artifact_data.get('html') %}
+      <a href="{{ artifact_data.html.url }}" class="btn btn-sm" target="_blank" title="Download HTML">
+        <span class="artifact-dl-icon">&#8615;</span> HTML
+        <span class="text-muted text-sm">({{ (artifact_data.html.size / 1024) | round(1) }}KB)</span>
+      </a>
+      {% endif %}
+      {% if artifact_data and artifact_data.get('pdf') %}
+      <a href="{{ artifact_data.pdf.url }}" class="btn btn-sm" target="_blank" title="Download PDF">
+        <span class="artifact-dl-icon">&#8615;</span> PDF
+        <span class="text-muted text-sm">({{ (artifact_data.pdf.size / 1024) | round(1) }}KB)</span>
+      </a>
+      {% endif %}
+      {% if not artifact_data or (not artifact_data.get('md') and not artifact_data.get('html') and not artifact_data.get('pdf')) %}
+      <span class="text-muted text-sm">No artifacts generated yet.</span>
+      {% endif %}
+    </div>
+  </div>
+</div>

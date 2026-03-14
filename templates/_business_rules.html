@@ -1,0 +1,99 @@
+{# _business_rules.html — Business rule toggles partial.
+   Accepts:
+     rules: list of rule dicts from preset (business_rules)
+     user_rules: list of user-configured rules from state_json (may be None)
+#}
+<div class="business-rules-list">
+  {% set effective_rules = user_rules if user_rules is not none else rules %}
+
+  {% if effective_rules %}
+    {% for rule in effective_rules %}
+    <div class="rule-toggle-row" data-rule-id="{{ rule.id if rule is mapping else rule }}"
+         style="display:flex;align-items:flex-start;gap:1rem;padding:1rem;border:1px solid var(--color-border);border-radius:var(--radius);margin-bottom:0.75rem">
+      <div style="flex-shrink:0;padding-top:2px">
+        <label class="toggle-switch">
+          <input type="checkbox" class="rule-enabled"
+                 {% if rule is mapping and rule.get('enabled', true) %}checked{% elif rule is not mapping %}checked{% endif %}>
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <div style="flex:1">
+        {% if rule is mapping %}
+        <div style="font-weight:600;font-size:14px;margin-bottom:0.25rem">
+          {{ rule.get('id', rule.get('name', 'Rule')) | replace('_', ' ') | title }}
+        </div>
+        {% if rule.get('description') %}
+        <p class="text-muted text-sm" style="margin-bottom:0.5rem">{{ rule.description }}</p>
+        {% endif %}
+        {% if rule.get('parameters') %}
+        <div class="rule-params" style="display:flex;flex-wrap:wrap;gap:0.5rem;margin-top:0.5rem">
+          {% for param_name, param_val in rule.parameters.items() %}
+          <div style="display:flex;align-items:center;gap:0.4rem">
+            <label class="text-muted text-sm">{{ param_name }}:</label>
+            <input type="text" class="form-input rule-param" name="{{ param_name }}"
+                   value="{{ param_val }}" style="max-width:120px;padding:4px 8px;font-size:12px">
+          </div>
+          {% endfor %}
+        </div>
+        {% endif %}
+        {% else %}
+        <div style="font-weight:600;font-size:14px">{{ rule | replace('_', ' ') | title }}</div>
+        {% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  {% else %}
+    <div class="rule-toggle-row" data-rule-id="quantity_chain"
+         style="display:flex;align-items:flex-start;gap:1rem;padding:1rem;border:1px solid var(--color-border);border-radius:var(--radius);margin-bottom:0.75rem">
+      <div style="flex-shrink:0;padding-top:2px">
+        <label class="toggle-switch">
+          <input type="checkbox" class="rule-enabled" checked>
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <div style="flex:1">
+        <div style="font-weight:600;font-size:14px;margin-bottom:0.25rem">Quantity Chain</div>
+        <p class="text-muted text-sm">Enforce quantity chain validation across PO lifecycle (ordered >= acknowledged >= shipped).</p>
+      </div>
+    </div>
+    <div class="rule-toggle-row" data-rule-id="n1_qualifier_transform"
+         style="display:flex;align-items:flex-start;gap:1rem;padding:1rem;border:1px solid var(--color-border);border-radius:var(--radius);margin-bottom:0.75rem">
+      <div style="flex-shrink:0;padding-top:2px">
+        <label class="toggle-switch">
+          <input type="checkbox" class="rule-enabled" checked>
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <div style="flex:1">
+        <div style="font-weight:600;font-size:14px;margin-bottom:0.25rem">N1 Qualifier Transform</div>
+        <p class="text-muted text-sm">Validate N1 loop qualifier codes (ST, BT, VN, SF) and enforce N103/N104 consistency.</p>
+      </div>
+    </div>
+    <div class="rule-toggle-row" data-rule-id="fob_restriction"
+         style="display:flex;align-items:flex-start;gap:1rem;padding:1rem;border:1px solid var(--color-border);border-radius:var(--radius);margin-bottom:0.75rem">
+      <div style="flex-shrink:0;padding-top:2px">
+        <label class="toggle-switch">
+          <input type="checkbox" class="rule-enabled">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <div style="flex:1">
+        <div style="font-weight:600;font-size:14px;margin-bottom:0.25rem">FOB Restriction</div>
+        <p class="text-muted text-sm">Restrict FOB codes to CC (collect) and PP (prepaid) only.</p>
+      </div>
+    </div>
+    <div class="rule-toggle-row" data-rule-id="po_primary_key"
+         style="display:flex;align-items:flex-start;gap:1rem;padding:1rem;border:1px solid var(--color-border);border-radius:var(--radius);margin-bottom:0.75rem">
+      <div style="flex-shrink:0;padding-top:2px">
+        <label class="toggle-switch">
+          <input type="checkbox" class="rule-enabled" checked>
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <div style="flex:1">
+        <div style="font-weight:600;font-size:14px;margin-bottom:0.25rem">PO Primary Key</div>
+        <p class="text-muted text-sm">Enforce PO number as primary key across all transactions and lifecycle events (NC-03).</p>
+      </div>
+    </div>
+  {% endif %}
+</div>
