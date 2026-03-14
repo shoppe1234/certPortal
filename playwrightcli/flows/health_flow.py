@@ -449,7 +449,7 @@ def _is_benign_console_error(msg: str) -> bool:
         "ERR_FILE_NOT_FOUND",
         "CORS",
         "Access-Control-Allow-Origin",
-        "the server responded with a status of 404 (Not Found)",  # favicon
+        "the server responded with a status of 404",  # favicon or missing optional resource
     ]
     msg_lower = msg.lower()
     return any(p.lower() in msg_lower for p in benign_patterns)

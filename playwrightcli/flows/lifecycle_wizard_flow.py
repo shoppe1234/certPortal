@@ -259,10 +259,10 @@ class LifecycleWizardFlow:
             sc = self._verifier.signal_checker
             if sc:
                 # Look for lifecycle YAML in the retailer's workspace
-                exists = sc.object_exists(f"lowes/specs/004010/lifecycle.yaml")
+                exists = sc.object_exists(f"lowes/system/lifecycle/004010/lifecycle.yaml")
                 if not exists:
                     # Also check alternative paths
-                    signals = sc.list_signals_since("lowes/specs/", 0)
+                    signals = sc.list_signals_since("lowes/system/lifecycle/", 0)
                     exists = any("lifecycle" in s.get("Key", "") for s in signals)
                 self._verifier.verify_lifecycle_wizard_s3(exists)
             else:

@@ -11,3 +11,11 @@
   Correction: Tried: relogin
 - meredith::supplier-status: Failed after 3 retries
   Correction: Tried: relogin
+- meredith::spec-setup: Failed after 3 retries
+  Correction: Tried: relogin
+- meredith::logout: Failed after 2 retries
+  Correction: Tried: wait_500
+- scope::cert-dashboard: Failed after 3 retries
+  Correction: Tried: networkidle
+- scope::cert-certification: Failed after 3 retries
+  Correction: Tried: networkidle

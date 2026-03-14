@@ -1,15 +1,15 @@
-"""extractor.py — PDF → FieldInventory via schema-constrained GPT-4o extraction.
+"""extractor.py — PDF → FieldInventory via schema-constrained Claude extraction.
 
 Unlike Andy's open-ended Path 1 prompt, this extractor:
   1. Targets only known 850 segments (ISA, GS, BEG, REF, DTM, N1/N3/N4,
      PO1, PO3, PID, CTT) with element-level granularity.
-  2. Uses response_format=json_object with an explicit JSON schema contract
-     so the LLM fills in a pre-defined structure rather than inventing one.
+  2. Uses a schema-contract system prompt so the LLM fills in a pre-defined
+     structure rather than inventing one.
   3. Returns a typed FieldInventory — no YAML involved at this stage.
 
-Dependencies: openai, pdfplumber  (both already in requirements.txt)
+Backend: anthropic (claude-opus-4-6) — requires ANTHROPIC_API_KEY env var.
+Dependencies: anthropic, pdfplumber  (both already in requirements.txt)
 No imports from certportal/, portals/, agents/, lifecycle_engine/.
-OPENAI_API_KEY is read from the environment.
 """
 from __future__ import annotations
 
@@ -20,8 +20,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import anthropic
 import pdfplumber
-from openai import OpenAI
 
 from lab_850.schema import ElementSpec, FieldInventory, SegmentSpec
 
@@ -94,7 +94,7 @@ def extract_from_pdf(
     retailer_slug: str,
     retailer_name: str = "",
     api_key: str | None = None,
-    model: str = "gpt-4o",
+    model: str = "claude-opus-4-6",
 ) -> FieldInventory:
     """Extract an 850 FieldInventory from a TPG PDF.
 
@@ -119,7 +119,7 @@ def extract_from_pdf(
     print(f"  [extractor] Extracted {len(pdf_text):,} chars from {pdf_path.name}")
 
     print(f"  [extractor] Calling {model} for schema-constrained extraction…")
-    raw_json = _call_gpt(pdf_text, model=model, api_key=api_key)
+    raw_json = _call_llm(pdf_text, model=model, api_key=api_key)
 
     inventory = _build_inventory(
         raw=raw_json,
@@ -139,13 +139,13 @@ def extract_from_text(
     retailer_slug: str,
     retailer_name: str = "",
     api_key: str | None = None,
-    model: str = "gpt-4o",
+    model: str = "claude-opus-4-6",
     source_pdf: str = "inline",
 ) -> FieldInventory:
     """Extract from pre-extracted PDF text (useful for testing without a real PDF)."""
     if not retailer_name:
         retailer_name = retailer_slug.replace("-", " ").replace("_", " ").title()
-    raw_json = _call_gpt(pdf_text, model=model, api_key=api_key)
+    raw_json = _call_llm(pdf_text, model=model, api_key=api_key)
     return _build_inventory(
         raw=raw_json,
         retailer_slug=retailer_slug,
@@ -169,17 +169,17 @@ def _extract_text(pdf_path: Path) -> str:
     return "\n\n".join(parts)
 
 
-def _call_gpt(
+def _call_llm(
     pdf_text: str,
     model: str,
     api_key: str | None,
 ) -> dict[str, Any]:
-    """Send the PDF text to GPT-4o with schema-constrained prompt. Returns parsed JSON."""
-    key = api_key or os.environ.get("OPENAI_API_KEY")
+    """Send the PDF text to Claude with schema-constrained prompt. Returns parsed JSON."""
+    key = api_key or os.environ.get("ANTHROPIC_API_KEY")
     if not key:
-        raise EnvironmentError("OPENAI_API_KEY not set and no api_key argument provided.")
+        raise EnvironmentError("ANTHROPIC_API_KEY not set and no api_key argument provided.")
 
-    client = OpenAI(api_key=key)
+    client = anthropic.Anthropic(api_key=key)
 
     # Truncate to ~100k chars to stay within context limits
     user_content = (
@@ -188,23 +188,24 @@ def _call_gpt(
         + "\n\nExtract and return the JSON structure as specified."
     )
 
-    response = client.chat.completions.create(
+    with client.messages.stream(
         model=model,
-        messages=[
-            {"role": "system", "content": _SYSTEM_PROMPT},
-            {"role": "user", "content": user_content},
-        ],
         max_tokens=4096,
-        temperature=0.0,
-        response_format={"type": "json_object"},
-    )
+        thinking={"type": "adaptive"},
+        system=_SYSTEM_PROMPT,
+        messages=[{"role": "user", "content": user_content}],
+    ) as stream:
+        response = stream.get_final_message()
 
-    raw = response.choices[0].message.content.strip()
+    raw = next(
+        (b.text for b in response.content if b.type == "text"), ""
+    ).strip()
+
     try:
         return json.loads(raw)
     except json.JSONDecodeError as exc:
         raise ValueError(
-            f"GPT-4o returned non-JSON response (first 200 chars): {raw[:200]!r}"
+            f"Claude returned non-JSON response (first 200 chars): {raw[:200]!r}"
         ) from exc
 
 

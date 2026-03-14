@@ -27,8 +27,39 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _slugify(name: str) -> str:
+    """Convert a PDF filename stem to a clean retailer slug.
+
+    Lowercases, strips version-like suffixes (v4010, 005010, etc.),
+    collapses any run of non-alphanumeric characters to a single underscore,
+    and strips leading/trailing underscores.
+
+    Examples:
+      "Lowe's Merch Stock 850 Purchase Order v4010" -> "lowes_merch_stock"
+      "United Hardware DIB 850 4010 (1)"            -> "united_hardware_dib"
+      "United Hardware DIB 850 4010"                -> "united_hardware_dib"
+    """
+    s = name.lower()
+    s = s.replace("'", "").replace("`", "")     # drop apostrophes before general pass
+    # Strip common EDI suffixes: transaction set numbers, version numbers
+    s = re.sub(r"\b(850|855|856|810|997|860|865)\b", "", s)
+    s = re.sub(r"\bv?\d{4,6}\b", "", s)        # v4010, 005010, 4010
+    s = re.sub(r"\(?\d+\)?$", "", s)            # trailing (1), 1, etc.
+    s = re.sub(r"purchase\s*order", "", s)       # redundant for 850s
+    s = re.sub(r"[^a-z0-9]+", "_", s)           # non-alphanumeric -> _
+    s = s.strip("_")
+    return s or "retailer"
+
 
 # ---------------------------------------------------------------------------
 # CLI
@@ -93,8 +124,8 @@ def main(argv: list[str] | None = None) -> None:
     # Model
     parser.add_argument(
         "--model",
-        default="gpt-4o",
-        help="OpenAI model to use for extraction (default: gpt-4o).",
+        default="claude-opus-4-6",
+        help="Claude model to use for extraction (default: claude-opus-4-6).",
     )
 
     # Flags
@@ -133,9 +164,20 @@ def main(argv: list[str] | None = None) -> None:
             print(f"ERROR: No PDF files found in {pdfs_dir}", file=sys.stderr)
             sys.exit(1)
         targets = [
-            (p, p.stem.lower().replace(" ", "_"), "")
+            (p, _slugify(p.stem), "")
             for p in pdf_files
         ]
+        # Warn on duplicate slugs (two PDFs mapping to the same slug would overwrite)
+        seen_slugs: dict[str, str] = {}
+        for pdf_path, slug, _ in targets:
+            if slug in seen_slugs:
+                print(
+                    f"WARNING: '{pdf_path.name}' and '{seen_slugs[slug]}' both map to "
+                    f"slug '{slug}'. The second will overwrite the first.\n"
+                    f"  Rename one PDF or use --pdf --retailer to process them separately.",
+                    file=sys.stderr,
+                )
+            seen_slugs[slug] = pdf_path.name
 
     # ------------------------------------------------------------------
     # Dry-run

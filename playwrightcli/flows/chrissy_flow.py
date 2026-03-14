@@ -11,6 +11,7 @@ Steps:
 """
 from __future__ import annotations
 
+import os
 import time
 
 from playwrightcli.flows.base_flow import BaseFlow
@@ -110,6 +111,27 @@ class ChrissyFlow(BaseFlow):
         """
         if self._verifier is None:
             return  # --verify not active; skip entirely
+
+        # Pre-step: reset SIG-TEST-01 patch to applied=FALSE for idempotent re-runs
+        try:
+            import psycopg2
+            db_url = os.environ.get("CERTPORTAL_DB_URL", "")
+            if not db_url:
+                from playwrightcli.fixtures.signal_checker import _load_dotenv
+                env = _load_dotenv()
+                db_url = env.get("CERTPORTAL_DB_URL", "")
+            if db_url:
+                conn = psycopg2.connect(db_url)
+                cur = conn.cursor()
+                cur.execute(
+                    "UPDATE patch_suggestions SET applied = FALSE "
+                    "WHERE error_code = 'SIG-TEST-01' AND applied = TRUE"
+                )
+                conn.commit()
+                cur.close()
+                conn.close()
+        except Exception:
+            pass  # Best-effort; if DB is unreachable the test will fail naturally
 
         await self.goto("/patches")
         await self.assert_page_ok()
