@@ -971,3 +971,45 @@ S3 verification follows the same three-check pattern (HTTP 200 / signal exists /
 - SIG-YAML1-01..03 and SIG-YAML3-01..03: 6 new requirement checks.
 - S3 checks degrade to SKIP when SignalChecker is unavailable (same as SIG-YAML2-*).
 - MEREDITH_STEPS extended with yaml-wizard-path1-signal and yaml-wizard-path3-signal.
+
+---
+
+## ADR-032: Two-wizard architecture replaces PDF upload
+
+**Context:** Meredith portal previously used Dwight agent (GPT-4o) to analyze uploaded PDFs and generate THESIS.md specs. This was a single-pass LLM operation with no user control over output.
+**Decision:** Replace PDF upload with two independent wizards: (1) Lifecycle Wizard for defining transaction lifecycles (use/copy/create modes), (2) Layer 2 YAML Wizard for configuring transaction-specific qualifiers, business rules, and mappings. Artifacts (MD/HTML/PDF) generated after Layer 2 config with retailer-specific annotations baked in.
+**Why:** Deterministic, user-controlled spec generation. White-label ready. Competitive advantage through pre-built templates. Artifacts distributed to suppliers include retailer-specific requirements.
+**Deferred:** Dwight, Andy Path 1, lab_850 seeds moved to TODO.md for future re-incorporation.
+
+---
+
+## ADR-033: Dynamic X12 sourcing from pyx12 + Stedi
+
+**Context:** Transaction structures were previously defined only in edi_framework/ YAML files, limited to X12 4010 and 6 Lowe's transactions.
+**Decision:** Created x12_source.py abstraction layer that reads from pyx12 XML map files AND Stedi JSON schemas. Supports X12 versions 4010, 4030, 5010 dynamically. No hardcoded transaction types, segments, or elements in Python code.
+**Why:** Competitive advantage — support any X12 version and transaction type without code changes. NC-02 (YAML is the brain) extended to external X12 libraries.
+**Fallback:** If pyx12 maps don't cover a transaction (retail maps not included in pyx12), falls back to edi_framework/ YAML files via template_loader.
+
+---
+
+## ADR-034: partner_registry.yaml as Layer 0 white-label foundation
+
+**Context:** lowes_master.yaml served as both partner config and transaction registry. Adding future partners would require code changes.
+**Decision:** Created edi_framework/partner_registry.yaml as a Layer 0 registry that lists all available partners, their X12 versions, and supported transaction sets. Lowe's is the first entry. Future partners add a YAML entry, not code.
+**Why:** White-label commercial viability. Extensibility without code changes.
+
+---
+
+## ADR-035: Artifacts generated after Layer 2 config
+
+**Context:** Original design generated spec artifacts after lifecycle definition. But retailers need to distribute specs to suppliers with specific qualifier requirements, business rules, and mapping instructions embedded.
+**Decision:** Artifact generation (MD/HTML/PDF) happens AFTER Layer 2 YAML is configured. spec_builder.py merges Layer 1 (base X12 structure) + Layer 2 (retailer overrides) into unified spec. Layer 2 annotations appear inline (e.g., "N103: qualifier 93 [REQUIRED BY RETAILER]").
+**Why:** Suppliers receive complete, actionable specs. No separate document for retailer-specific requirements.
+
+---
+
+## ADR-036: Multi-session wizard with JSONB persistence
+
+**Context:** Wizard configuration involves multiple steps across potentially multiple sessions. Retailers may want to experiment with different configurations simultaneously.
+**Decision:** wizard_sessions table with JSONB state_json column. Multiple active (incomplete) sessions per retailer allowed. Strict/deterministic validation only at finalization (generate step). Sessions persist until explicitly completed or deleted.
+**Why:** Flexibility during configuration, strictness at commit time. DB persistence survives browser close and server restart.

@@ -52,6 +52,21 @@ Pykwalify-based YAML validation. Dual role:
 - `lifecycle/order_to_cash.yaml` — State machine definition (717 lines)
 - `meta/` — 3 pykwalify meta-schemas
 - `lowes_master.yaml` — Transaction registry
+- `partner_registry.yaml` — White-label partner registry (Layer 0)
+- `templates/layer2_presets.yaml` — Competitive advantage presets
+
+### certportal/generators/ (Wizard Refactoring)
+Deterministic spec generation pipeline. Synchronous in-portal Python (no agent signals).
+- `x12_source.py` — Dual pyx12/Stedi X12 definition loader. NO HARDCODING.
+- `version_registry.py` — Dynamic X12 version enumeration (4010, 4030, 5010)
+- `template_loader.py` — Reads partner_registry, presets, lifecycles, transactions
+- `lifecycle_builder.py` — Use/copy/create lifecycle modes with pykwalify validation
+- `layer2_builder.py` — Preset + override merge with meta-schema validation
+- `spec_builder.py` — Merges Layer 1 + Layer 2 → unified spec → MD/HTML/PDF artifacts
+- `render_markdown.py` — Companion guide with Layer 2 annotations
+- `render_html.py` — Branded HTML (Meredith theme)
+- `render_pdf.py` — weasyprint/fpdf2 PDF generation
+- `artifact_writer.py` — S3 + DB artifact persistence
 
 ### certportal/core/ (Sprints 1–6)
 - `auth.py` — JWT HS256 (access + refresh tokens), bcrypt, DB-backed auth with _DEV_USERS fallback, JWT revocation (jti), password reset tokens, revoked token cleanup
@@ -66,7 +81,7 @@ Pykwalify-based YAML validation. Dual role:
 ### Portals (Sprints 1–6)
 All three portals: FastAPI + Jinja2 + HTMX, JWT-protected with role scoping.
 - `portals/pam.py` — Admin portal (port 8000): HITL queue, /register (admin-only), dashboard
-- `portals/meredith.py` — Retailer portal (port 8001): spec setup, YAML wizard, workspace signals
+- `portals/meredith.py` — Retailer portal (port 8001): spec setup, Lifecycle Wizard, Layer 2 YAML Wizard, artifact gallery, workspace signals
 - `portals/chrissy.py` — Supplier portal (port 8002): patch apply/reject/content viewer
 
 Auth on all portals: /login, /token, /token/refresh, /logout, /change-password, /forgot-password, /reset-password
@@ -94,6 +109,8 @@ Auth on all portals: /login, /token, /token/refresh, /logout, /change-password, 
 4. `migrations/003_patch_reject.sql` — patch_suggestions.rejected column
 5. `migrations/004_revoked_tokens.sql` — revoked_tokens (JWT revocation)
 6. `migrations/005_password_reset.sql` — password_reset_tokens + portal_users.email column
+7. `migrations/007_wizard_sessions.sql` — wizard_sessions (JSONB state, multi-session)
+8. `migrations/008_retailer_specs_v2.sql` — retailer_specs v2 (x12_version, artifacts)
 
 ## S3 Workspace
 - Use existing S3AgentWorkspace abstraction from certportal.core

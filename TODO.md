@@ -90,6 +90,35 @@ Items that belong in the main codebase, not in the test harness.
 
 ---
 
+### Deferred — Wizard Refactoring
+
+**Dwight Re-incorporation**
+- Reconnect PDF analysis as optional/admin fallback for spec creation
+- Dwight agent stays in codebase, just disconnected from Meredith wizard flow
+- Files: `agents/dwight.py`, `portals/meredith.py`
+
+**Andy Path 1 (PDF → YAML)**
+- Re-enable when Dwight is re-incorporated
+- Path 1 signal handler currently returns 410 Gone
+- Files: `agents/andy.py`, `portals/meredith.py`
+
+**lab_850 Seed Integration**
+- Re-enable as optional pre-fill source for Layer 2 wizard
+- lab_850 generates wizard_payload JSON that can seed Layer 2 presets
+- Files: `lab_850/seed_generator.py`, `certportal/generators/layer2_builder.py`
+
+**THESIS.md Artifact Format**
+- Re-enable when Dwight is re-incorporated
+- May become one of the artifact formats alongside MD/HTML/PDF
+
+**Admin Template Upload Portal (PAM)**
+- Add PAM route for admins to upload pre-formatted Layer 2 templates
+- Templates become available to all retailers in the Layer 2 wizard
+- Competitive advantage: curated templates as a service offering
+- Files: `portals/pam.py`, `edi_framework/templates/`
+
+---
+
 ### Security & Production Readiness
 
 **Rate Limiting on Auth Endpoints**
@@ -168,7 +197,7 @@ Items that belong in the main codebase, not in the test harness.
 python -m playwrightcli --portal all --verify --headless
 
 PAM      40 checks  (auth, dashboard, retailers, suppliers, HITL, gate enforcement, password reset, JWT revocation, memory)
-MEREDITH 24 checks  (auth, spec setup, supplier status, YAML wizard signals path 2/1/3)
+MEREDITH 24 checks  (auth, spec setup, supplier status, YAML wizard signals path 2/3; SIG-YAML1 SKIP — Path 1 deprecated)
 CHRISSY  30 checks  (auth, dashboard, scenarios, errors, patches, patch signal, certification)
 SCOPE    14 checks  (supplier A/B isolation, retailer A/B isolation, cert full flow)
 RBAC      3 checks  (supplier→PAM, retailer→Chrissy, supplier→Meredith)
