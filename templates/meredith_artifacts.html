@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block title %}certPortal Retailer — Spec Artifacts{% endblock %}
+{% block fonts %}<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">{% endblock %}
+
+{% block nav_links %}
+<li><a href="/" class="nav-link">Home</a></li>
+<li><a href="/spec-setup" class="nav-link">EDI Configuration</a></li>
+<li><a href="/yaml-wizard" class="nav-link">YAML Wizard</a></li>
+<li><a href="/supplier-status" class="nav-link">Supplier Status</a></li>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1 class="page-title">Spec Artifacts</h1>
+  <p class="page-subtitle">Download your generated spec documents. These include your Layer 2 configuration and are ready to distribute to suppliers.</p>
+</div>
+
+{% if not has_artifacts %}
+<div class="empty-state">
+  <div class="empty-icon">&#128451;</div>
+  <h3 class="empty-title">No artifacts generated yet</h3>
+  <p class="text-muted" style="margin-bottom:1.5rem">
+    Configure your transactions using the Layer 2 Wizard, then generate artifacts (MD/HTML/PDF) from the final step.
+  </p>
+  <a href="/yaml-wizard" class="btn btn-primary">Open Layer 2 Wizard &rarr;</a>
+</div>
+{% else %}
+
+{% for group in artifact_groups %}
+{% if group.artifacts_prefix %}
+<div class="section">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem">
+    <div>
+      <h3 style="font-size:16px;font-weight:600">{{ group.retailer_slug | replace('-', ' ') | title }}</h3>
+      <span class="text-sm text-muted">
+        X12 {{ group.x12_version }}
+        {% if group.created_at %}&middot; Generated {{ group.created_at.strftime('%b %d, %Y') }}{% endif %}
+        &middot; {{ group.transactions | length }} transaction{{ 's' if group.transactions | length != 1 else '' }}
+      </span>
+    </div>
+  </div>
+
+  {% if group.transactions %}
+  <div style="display:flex;flex-direction:column;gap:0.75rem">
+    {% for tx in group.transactions %}
+    <div class="artifact-card" style="max-width:none">
+      <div class="artifact-card-header">
+        <div class="artifact-card-title">
+          <span class="artifact-tx-code">{{ tx.tx_code }}</span>
+          <span class="artifact-tx-name">{{ tx.tx_name }}</span>
+        </div>
+        <div>
+          {% if tx.layer2_configured %}
+          <span class="gate-pill gate-complete">Layer 2: Configured</span>
+          {% else %}
+          <span class="gate-pill gate-pending">Layer 2: Pending</span>
+          {% endif %}
+        </div>
+      </div>
+      <div class="artifact-card-body">
+        {% if tx.layer2_configured %}
+        <div class="artifact-downloads">
+          <a href="{{ tx.download_md }}" class="btn btn-sm btn-primary" target="_blank">
+            <span class="artifact-dl-icon">&#128196;</span> Markdown
+          </a>
+          <a href="{{ tx.download_html }}" class="btn btn-sm btn-primary" target="_blank">
+            <span class="artifact-dl-icon">&#127760;</span> HTML
+          </a>
+          <a href="{{ tx.download_pdf }}" class="btn btn-sm btn-primary" target="_blank">
+            <span class="artifact-dl-icon">&#128462;</span> PDF
+          </a>
+        </div>
+        {% else %}
+        <p class="text-muted text-sm">
+          Layer 2 not yet configured for this transaction.
+          <a href="/yaml-wizard" style="color:var(--color-primary);text-decoration:underline">Configure now &rarr;</a>
+        </p>
+        {% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="text-muted">No transactions configured yet.</p>
+  {% endif %}
+</div>
+{% endif %}
+{% endfor %}
+
+{% endif %}
+{% endblock %}

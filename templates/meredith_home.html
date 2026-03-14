@@ -7,7 +7,7 @@
 
 {% block nav_links %}
 <li><a href="/" class="nav-link active">Home</a></li>
-<li><a href="/spec-setup" class="nav-link">Spec Setup</a></li>
+<li><a href="/spec-setup" class="nav-link">EDI Configuration</a></li>
 <li><a href="/yaml-wizard" class="nav-link">YAML Wizard</a></li>
 <li><a href="/supplier-status" class="nav-link">Supplier Status</a></li>
 {% endblock %}
@@ -46,31 +46,39 @@
 <!-- Getting started / quick actions -->
 <div class="card-grid">
   <div class="action-card">
-    <div class="action-icon">📋</div>
-    <h3 class="action-title">Spec Setup</h3>
-    <p class="action-desc">Upload your Trading Partner Guide and generate a THESIS.md specification document via Dwight.</p>
-    <a href="/spec-setup" class="btn btn-primary">Go to Spec Setup →</a>
+    <div class="action-icon">&#9881;</div>
+    <h3 class="action-title">EDI Configuration</h3>
+    <p class="action-desc">Configure your X12 lifecycle and transaction specs using the Lifecycle and Layer 2 wizards.</p>
+    <a href="/spec-setup" class="btn btn-primary">Go to EDI Configuration &rarr;</a>
   </div>
   <div class="action-card">
-    <div class="action-icon">🗂</div>
+    <div class="action-icon">&#128196;</div>
     <h3 class="action-title">YAML Wizard</h3>
-    <p class="action-desc">Map EDI transaction requirements using PDF extraction, direct upload, or the step-by-step wizard.</p>
-    <a href="/yaml-wizard" class="btn btn-primary">Open YAML Wizard →</a>
+    <p class="action-desc">Build Layer 2 YAML configurations for your transactions, or upload existing YAML files.</p>
+    <a href="/yaml-wizard" class="btn btn-primary">Open YAML Wizard &rarr;</a>
   </div>
   <div class="action-card">
-    <div class="action-icon">📊</div>
+    <div class="action-icon">&#128202;</div>
     <h3 class="action-title">Supplier Status</h3>
     <p class="action-desc">Track certification progress across all your suppliers. View gate status and test results.</p>
-    <a href="/supplier-status" class="btn btn-primary">View Status Board →</a>
+    <a href="/supplier-status" class="btn btn-primary">View Status Board &rarr;</a>
   </div>
+  {% if has_artifacts %}
+  <div class="action-card">
+    <div class="action-icon">&#128451;</div>
+    <h3 class="action-title">Spec Artifacts</h3>
+    <p class="action-desc">Download your generated spec documents (MD/HTML/PDF) ready to distribute to suppliers.</p>
+    <a href="/artifacts" class="btn btn-primary">View Artifacts &rarr;</a>
+  </div>
+  {% endif %}
 </div>
 
 {% if not spec %}
 <div class="onboarding-banner">
-  <div class="onboarding-icon">👋</div>
+  <div class="onboarding-icon">&#128075;</div>
   <div class="onboarding-text">
     <strong>Welcome to certPortal!</strong>
-    <p>Start by setting up your EDI specification — upload your Trading Partner Guide in <a href="/spec-setup">Spec Setup</a>.</p>
+    <p>Start by configuring your EDI specification — use the <a href="/lifecycle-wizard">Lifecycle Wizard</a> to define your transaction flow, then the <a href="/yaml-wizard">Layer 2 Wizard</a> to configure each transaction.</p>
   </div>
 </div>
 {% endif %}

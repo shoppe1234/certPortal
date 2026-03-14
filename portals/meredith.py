@@ -429,6 +429,17 @@ async def home(
             "SELECT COUNT(*) FROM hitl_gate_status WHERE gate_3 = 'CERTIFIED'"
         ) or 0
 
+    # Check if retailer has generated artifacts (F4: conditionally show Artifacts card)
+    if retailer_slug:
+        has_artifacts = await conn.fetchval(
+            "SELECT EXISTS(SELECT 1 FROM retailer_specs WHERE retailer_slug = $1 AND artifacts_s3_prefix IS NOT NULL)",
+            retailer_slug,
+        )
+    else:
+        has_artifacts = await conn.fetchval(
+            "SELECT EXISTS(SELECT 1 FROM retailer_specs WHERE artifacts_s3_prefix IS NOT NULL)"
+        )
+
     return templates.TemplateResponse(
         "meredith_home.html",
         {
@@ -438,6 +449,7 @@ async def home(
             "spec": dict(spec_row) if spec_row else None,
             "supplier_count": supplier_count,
             "certified_count": certified_count,
+            "has_artifacts": has_artifacts or False,
         },
     )
 
@@ -453,16 +465,56 @@ async def spec_setup(
     conn=Depends(get_connection),
     user: dict = Depends(get_current_user),
 ):
+    """F1 — EDI Configuration hub: entry points to Lifecycle and Layer 2 wizards, plus artifact gallery."""
     retailer_slug = user.get("retailer_slug")
+
+    # Fetch retailer specs to check for existing artifacts
     if retailer_slug:
         specs = await conn.fetch(
-            "SELECT retailer_slug, spec_version, thesis_s3_key, created_at FROM retailer_specs WHERE retailer_slug = $1 ORDER BY created_at DESC",
+            "SELECT retailer_slug, spec_version, x12_version, transaction_types, "
+            "artifacts_s3_prefix, layer2_configured, created_at "
+            "FROM retailer_specs WHERE retailer_slug = $1 ORDER BY created_at DESC",
             retailer_slug,
         )
     else:
         specs = await conn.fetch(
-            "SELECT retailer_slug, spec_version, thesis_s3_key, created_at FROM retailer_specs ORDER BY created_at DESC"
+            "SELECT retailer_slug, spec_version, x12_version, transaction_types, "
+            "artifacts_s3_prefix, layer2_configured, created_at "
+            "FROM retailer_specs ORDER BY created_at DESC"
         )
+
+    # Check for active wizard sessions
+    if retailer_slug:
+        lifecycle_sessions = await conn.fetch(
+            "SELECT id, session_name, step_number, created_at, updated_at "
+            "FROM wizard_sessions "
+            "WHERE retailer_slug = $1 AND wizard_type = 'lifecycle' AND completed_at IS NULL "
+            "ORDER BY updated_at DESC LIMIT 3",
+            retailer_slug,
+        )
+        layer2_sessions = await conn.fetch(
+            "SELECT id, session_name, step_number, x12_version, created_at, updated_at "
+            "FROM wizard_sessions "
+            "WHERE retailer_slug = $1 AND wizard_type = 'layer2' AND completed_at IS NULL "
+            "ORDER BY updated_at DESC LIMIT 3",
+            retailer_slug,
+        )
+    else:
+        lifecycle_sessions = await conn.fetch(
+            "SELECT id, session_name, step_number, created_at, updated_at "
+            "FROM wizard_sessions "
+            "WHERE wizard_type = 'lifecycle' AND completed_at IS NULL "
+            "ORDER BY updated_at DESC LIMIT 3",
+        )
+        layer2_sessions = await conn.fetch(
+            "SELECT id, session_name, step_number, x12_version, created_at, updated_at "
+            "FROM wizard_sessions "
+            "WHERE wizard_type = 'layer2' AND completed_at IS NULL "
+            "ORDER BY updated_at DESC LIMIT 3",
+        )
+
+    has_artifacts = any(s.get("artifacts_s3_prefix") for s in specs)
+
     return templates.TemplateResponse(
         "meredith_spec_setup.html",
         {
@@ -470,6 +522,9 @@ async def spec_setup(
             "portal_name": "meredith",
             "current_user": user,
             "specs": [dict(s) for s in specs],
+            "lifecycle_sessions": [dict(r) for r in lifecycle_sessions],
+            "layer2_sessions": [dict(r) for r in layer2_sessions],
+            "has_artifacts": has_artifacts,
         },
     )
 
@@ -479,32 +534,13 @@ async def trigger_spec_upload(
     request: Request,
     user: dict = Depends(get_current_user),
 ):
-    """Trigger Dwight agent via S3 workspace signal. Never calls agents/ directly (INV-07)."""
-    body = await request.json()
-    pdf_s3_key = body.get("pdf_s3_key")
-    retailer_slug = body.get("retailer_slug") or user.get("retailer_slug")
-
-    if not pdf_s3_key or not retailer_slug:
-        raise HTTPException(status_code=400, detail="pdf_s3_key and retailer_slug required")
-
-    # INV-07: trigger Dwight via S3 workspace signal, never by direct import
-    ws = S3AgentWorkspace(retailer_slug, "system")
-    ts = int(time.time())
-    ws.upload(
-        f"signals/dwight_trigger_{ts}.json",
-        json.dumps({
-            "type": "dwight_spec_analysis",
-            "pdf_s3_key": pdf_s3_key,
-            "retailer_slug": retailer_slug,
-        }),
-    )
+    """F2 — Deprecated: PDF upload replaced by Lifecycle and Layer 2 wizards. Returns 410 Gone."""
     return JSONResponse(
-        {
-            "status": "queued",
-            "message": "Dwight spec analysis queued via workspace signal.",
-            "retailer_slug": retailer_slug,
-            "pdf_s3_key": pdf_s3_key,
-        }
+        status_code=410,
+        content={
+            "detail": "PDF upload has been replaced by the Lifecycle and Layer 2 wizards. "
+            "See /lifecycle-wizard and /yaml-wizard."
+        },
     )
 
 
@@ -569,18 +605,14 @@ async def yaml_wizard(
 
 @router.post("/yaml-wizard/path1")
 async def yaml_wizard_path1(request: Request, user: dict = Depends(get_current_user)):
-    """Path 1: Trigger Andy PDF extraction via workspace signal (INV-07)."""
-    body = await request.json()
-    retailer_slug = body.get("retailer_slug") or user.get("retailer_slug")
-    if not retailer_slug:
-        raise HTTPException(status_code=400, detail="retailer_slug required")
-    ws = S3AgentWorkspace(retailer_slug, "system")
-    ts = int(time.time())
-    ws.upload(
-        f"signals/andy_path1_trigger_{ts}.json",
-        json.dumps({"type": "andy_yaml_path1", "retailer_slug": retailer_slug, **body}),
+    """F3 — Deprecated: PDF-to-YAML path replaced by Layer 2 wizard. Returns 410 Gone."""
+    return JSONResponse(
+        status_code=410,
+        content={
+            "detail": "PDF-to-YAML path has been deprecated. "
+            "Use the Layer 2 wizard at /yaml-wizard instead."
+        },
     )
-    return JSONResponse({"status": "queued", "path": 1, "payload": body})
 
 
 @router.post("/yaml-wizard/path2")
@@ -1596,6 +1628,98 @@ async def layer2_wizard_generate_artifacts(
     context["artifacts"] = artifact_info
     context["written_keys"] = written_keys
     return templates.TemplateResponse("meredith_layer2_wizard.html", context)
+
+
+@router.get("/artifacts", response_class=HTMLResponse)
+async def artifacts_gallery(
+    request: Request,
+    conn=Depends(get_connection),
+    user: dict = Depends(get_current_user),
+):
+    """F5 — Artifact gallery: lists all generated specs grouped by transaction, with download links."""
+    retailer_slug = user.get("retailer_slug")
+
+    # Fetch retailer specs with artifact info
+    if retailer_slug:
+        specs = await conn.fetch(
+            "SELECT retailer_slug, spec_version, x12_version, transaction_types, "
+            "artifacts_s3_prefix, layer2_configured, created_at "
+            "FROM retailer_specs WHERE retailer_slug = $1 ORDER BY created_at DESC",
+            retailer_slug,
+        )
+    else:
+        specs = await conn.fetch(
+            "SELECT retailer_slug, spec_version, x12_version, transaction_types, "
+            "artifacts_s3_prefix, layer2_configured, created_at "
+            "FROM retailer_specs ORDER BY created_at DESC"
+        )
+
+    # Fetch completed Layer 2 wizard sessions for layer2 status per transaction
+    if retailer_slug:
+        completed_l2 = await conn.fetch(
+            "SELECT state_json FROM wizard_sessions "
+            "WHERE retailer_slug = $1 AND wizard_type = 'layer2' AND completed_at IS NOT NULL",
+            retailer_slug,
+        )
+    else:
+        completed_l2 = await conn.fetch(
+            "SELECT state_json FROM wizard_sessions "
+            "WHERE wizard_type = 'layer2' AND completed_at IS NOT NULL",
+        )
+
+    # Build a set of transaction types that have been configured via Layer 2
+    configured_transactions = set()
+    for row in completed_l2:
+        state = row["state_json"]
+        if isinstance(state, str):
+            state = json.loads(state)
+        if isinstance(state, dict):
+            tx = state.get("transaction_type")
+            if tx:
+                configured_transactions.add(tx)
+
+    # Build artifact entries grouped by spec
+    artifact_groups = []
+    tx_names = {
+        "850": "Purchase Order",
+        "855": "PO Acknowledgment",
+        "856": "Ship Notice/Manifest",
+        "860": "PO Change Request",
+        "865": "PO Change Acknowledgment",
+        "810": "Invoice",
+    }
+    for spec in specs:
+        s = dict(spec)
+        tx_list = s.get("transaction_types") or []
+        slug = s["retailer_slug"]
+        entries = []
+        for tx in tx_list:
+            entries.append({
+                "tx_code": tx,
+                "tx_name": tx_names.get(tx, f"Transaction {tx}"),
+                "layer2_configured": tx in configured_transactions,
+                "download_md": f"/artifacts/{slug}/{tx}.md",
+                "download_html": f"/artifacts/{slug}/{tx}.html",
+                "download_pdf": f"/artifacts/{slug}/{tx}.pdf",
+            })
+        artifact_groups.append({
+            "retailer_slug": slug,
+            "x12_version": s.get("x12_version") or s.get("spec_version") or "N/A",
+            "artifacts_prefix": s.get("artifacts_s3_prefix"),
+            "created_at": s.get("created_at"),
+            "transactions": entries,
+        })
+
+    return templates.TemplateResponse(
+        "meredith_artifacts.html",
+        {
+            "request": request,
+            "portal_name": "meredith",
+            "current_user": user,
+            "artifact_groups": artifact_groups,
+            "has_artifacts": any(g["artifacts_prefix"] for g in artifact_groups),
+        },
+    )
 
 
 @router.get("/artifacts/{retailer_slug}/{filename}", response_class=StreamingResponse)

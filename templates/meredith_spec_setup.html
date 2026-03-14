@@ -1,99 +1,148 @@
 {% extends "base.html" %}
-{% block title %}certPortal Retailer — Spec Setup{% endblock %}
+{% block title %}certPortal Retailer — EDI Configuration{% endblock %}
 {% block fonts %}<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">{% endblock %}
 
 {% block nav_links %}
 <li><a href="/" class="nav-link">Home</a></li>
-<li><a href="/spec-setup" class="nav-link active">Spec Setup</a></li>
+<li><a href="/spec-setup" class="nav-link active">EDI Configuration</a></li>
 <li><a href="/yaml-wizard" class="nav-link">YAML Wizard</a></li>
 <li><a href="/supplier-status" class="nav-link">Supplier Status</a></li>
 {% endblock %}
 
 {% block content %}
 <div class="page-header">
-  <h1 class="page-title">Spec Setup</h1>
-  <p class="page-subtitle">Upload your Trading Partner Guide PDF to generate a THESIS.md specification.</p>
+  <h1 class="page-title">EDI Configuration</h1>
+  <p class="page-subtitle">Configure your X12 lifecycle and transaction specs using the two-wizard architecture.</p>
 </div>
 
-<!-- Accordion setup steps -->
-<div class="setup-steps">
+<!-- Wizard entry points -->
+<div class="card-grid" style="margin-bottom:2rem">
 
-  <!-- Step 1: Upload PDF -->
-  <details class="step-accordion" open>
-    <summary class="step-header">
-      <span class="step-number">1</span>
-      <span class="step-title">Upload Trading Partner Guide</span>
-      <span class="step-status">Required</span>
-    </summary>
-    <div class="step-body">
-      <p class="step-desc">Upload your retailer's EDI Trading Partner Guide PDF. Dwight will extract structured requirements automatically.</p>
-      <form id="pdf-upload-form" class="upload-form">
-        <div class="form-group">
-          <label class="form-label">Retailer Slug</label>
-          <input type="text" name="retailer_slug" class="form-input" placeholder="e.g. elior-group" required>
-        </div>
-        <div class="form-group">
-          <label class="form-label">PDF S3 Key (in certportal-raw-edi bucket)</label>
-          <input type="text" name="pdf_s3_key" class="form-input" placeholder="e.g. tpg/elior-edi-guide-2026.pdf" required>
-        </div>
-        <button type="submit"
-                class="btn btn-primary"
-                hx-post="/spec-setup/upload"
-                hx-include="#pdf-upload-form"
-                hx-target="#upload-result"
-                hx-swap="innerHTML">
-          Upload & Process →
-        </button>
-      </form>
-      <div id="upload-result" class="step-result" aria-live="polite"></div>
+  <!-- Lifecycle Wizard card -->
+  <div class="action-card">
+    <div class="action-icon">&#9851;</div>
+    <h3 class="action-title">Lifecycle Wizard</h3>
+    <p class="action-desc">Define which transactions compose your order-to-cash lifecycle and how they transition between states. Choose an existing lifecycle, clone and customize, or create from scratch.</p>
+    {% if lifecycle_sessions %}
+    <div style="margin-bottom:0.75rem">
+      <span class="text-sm text-muted">Active sessions:</span>
+      {% for sess in lifecycle_sessions %}
+      <a href="/lifecycle-wizard/{{ sess.id }}" class="gate-pill gate-pending" style="text-decoration:none;margin-left:0.25rem">
+        {{ sess.session_name or 'Untitled' }} (Step {{ sess.step_number + 1 }})
+      </a>
+      {% endfor %}
     </div>
-  </details>
+    {% endif %}
+    <a href="/lifecycle-wizard" class="btn btn-primary">Open Lifecycle Wizard &rarr;</a>
+  </div>
 
-  <!-- Step 2: Review THESIS.md -->
-  <details class="step-accordion">
-    <summary class="step-header">
-      <span class="step-number">2</span>
-      <span class="step-title">Review Generated THESIS.md</span>
-      <span class="step-status">After Step 1</span>
-    </summary>
-    <div class="step-body">
-      <p class="step-desc">Review Dwight's confidence assessment. Low-confidence sections need manual review before proceeding to YAML mapping.</p>
-      {% if specs %}
-      <div class="table-scroll">
-        <table class="data-table">
-          <thead>
-            <tr><th>Retailer</th><th>Version</th><th>THESIS Key</th><th>Created</th></tr>
-          </thead>
-          <tbody>
-            {% for s in specs %}
-            <tr>
-              <td class="font-medium">{{ s.retailer_slug }}</td>
-              <td>{{ s.spec_version }}</td>
-              <td class="text-sm text-muted" title="{{ s.thesis_s3_key }}">{{ s.thesis_s3_key | truncate(40) }}</td>
-              <td class="text-sm text-muted">{{ s.created_at.strftime('%Y-%m-%d') if s.created_at else '—' }}</td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-      {% else %}
-      <p class="text-muted">No specs yet. Complete Step 1 first.</p>
+  <!-- Layer 2 YAML Wizard card -->
+  <div class="action-card">
+    <div class="action-icon">&#128295;</div>
+    <h3 class="action-title">Layer 2 YAML Wizard</h3>
+    <p class="action-desc">Configure each transaction's qualifiers, business rules, and mappings. Start from a preset (Standard Retail, Minimal, or Blank) and customize segment-level details.</p>
+    {% if layer2_sessions %}
+    <div style="margin-bottom:0.75rem">
+      <span class="text-sm text-muted">Active sessions:</span>
+      {% for sess in layer2_sessions %}
+      <a href="/yaml-wizard/layer2/{{ sess.id }}" class="gate-pill gate-pending" style="text-decoration:none;margin-left:0.25rem">
+        {{ sess.session_name or 'Untitled' }} (Step {{ sess.step_number + 1 }})
+      </a>
+      {% endfor %}
+    </div>
+    {% endif %}
+    <a href="/yaml-wizard" class="btn btn-primary">Open Layer 2 Wizard &rarr;</a>
+  </div>
+
+</div>
+
+<!-- Configuration flow overview -->
+<div class="section">
+  <h3 style="font-size:16px;font-weight:600;margin-bottom:1rem">Configuration Flow</h3>
+  <div class="wizard-steps" style="margin-bottom:0">
+    <div class="wizard-step wizard-step--complete">
+      <div class="wizard-step-circle">1</div>
+      <span class="wizard-step-label">Lifecycle</span>
+    </div>
+    <div class="wizard-step-connector wizard-step-connector--complete"></div>
+    <div class="wizard-step wizard-step--active">
+      <div class="wizard-step-circle">2</div>
+      <span class="wizard-step-label">Layer 2 Config</span>
+    </div>
+    <div class="wizard-step-connector"></div>
+    <div class="wizard-step wizard-step--pending">
+      <div class="wizard-step-circle">3</div>
+      <span class="wizard-step-label">Generate Artifacts</span>
+    </div>
+    <div class="wizard-step-connector"></div>
+    <div class="wizard-step wizard-step--pending">
+      <div class="wizard-step-circle">4</div>
+      <span class="wizard-step-label">Distribute to Suppliers</span>
+    </div>
+  </div>
+  <p class="text-muted text-sm" style="margin-top:1rem">
+    Define your lifecycle first, then configure Layer 2 details per transaction. Artifacts (MD/HTML/PDF) are generated after Layer 2 configuration and include your retailer-specific qualifiers and rules.
+  </p>
+</div>
+
+<!-- Artifact gallery section -->
+{% if has_artifacts %}
+<div class="section" id="artifacts">
+  <h3 style="font-size:16px;font-weight:600;margin-bottom:0.75rem">Generated Spec Artifacts</h3>
+  <p class="text-muted text-sm" style="margin-bottom:1rem">Your generated specs are ready to distribute to suppliers.</p>
+  {% for spec in specs %}
+  {% if spec.artifacts_s3_prefix %}
+  <div style="display:flex;align-items:center;gap:1rem;padding:0.75rem 1rem;border:1px solid var(--color-border);border-radius:var(--radius);margin-bottom:0.5rem">
+    <div style="flex:1">
+      <span class="font-medium">{{ spec.retailer_slug }}</span>
+      {% if spec.x12_version %}<span class="gate-pill gate-complete" style="margin-left:0.5rem">X12 {{ spec.x12_version }}</span>{% endif %}
+      {% if spec.transaction_types %}
+      <span class="text-sm text-muted" style="margin-left:0.5rem">{{ spec.transaction_types | join(', ') }}</span>
       {% endif %}
     </div>
-  </details>
-
-  <!-- Step 3: Proceed to YAML Wizard -->
-  <details class="step-accordion">
-    <summary class="step-header">
-      <span class="step-number">3</span>
-      <span class="step-title">Map EDI Transactions</span>
-      <span class="step-status">After Step 2</span>
-    </summary>
-    <div class="step-body">
-      <p class="step-desc">With your specification reviewed, proceed to the YAML Wizard to create field-level mappings for each EDI transaction.</p>
-      <a href="/yaml-wizard" class="btn btn-primary">Open YAML Wizard →</a>
-    </div>
-  </details>
-
+    <a href="/artifacts" class="btn btn-sm btn-primary">View &amp; Download &rarr;</a>
+  </div>
+  {% endif %}
+  {% endfor %}
 </div>
+{% endif %}
+
+<!-- Existing specs table (legacy) -->
+{% if specs %}
+<div class="section">
+  <h3 style="font-size:16px;font-weight:600;margin-bottom:0.75rem">Retailer Specs</h3>
+  <div class="table-scroll">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Retailer</th>
+          <th>Version</th>
+          <th>X12</th>
+          <th>Transactions</th>
+          <th>Layer 2</th>
+          <th>Created</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for s in specs %}
+        <tr>
+          <td class="font-medium">{{ s.retailer_slug }}</td>
+          <td>{{ s.spec_version or '---' }}</td>
+          <td>{{ s.x12_version or '---' }}</td>
+          <td class="text-sm text-muted">{{ s.transaction_types | join(', ') if s.transaction_types else '---' }}</td>
+          <td>
+            {% if s.layer2_configured %}
+            <span class="gate-pill gate-complete">Configured</span>
+            {% else %}
+            <span class="gate-pill gate-pending">Pending</span>
+            {% endif %}
+          </td>
+          <td class="text-sm text-muted">{{ s.created_at.strftime('%Y-%m-%d') if s.created_at else '---' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
 {% endblock %}
