@@ -32,7 +32,7 @@ def _preflight(portal_names: list[str]) -> bool:
     """HTTP GET /health for each portal. Returns True if all respond 200."""
     all_ok = True
     for name in portal_names:
-        if name in ("scope", "rbac", "lifecycle-wizard", "layer2-wizard", "wizard-session"):
+        if name in ("scope", "rbac", "lifecycle-wizard", "layer2-wizard", "wizard-session", "health"):
             continue  # standalone flows check portals already covered by pam/meredith/chrissy
         url = PORTALS[name]["url"] + "/health"
         try:
@@ -73,6 +73,7 @@ async def _run_portal(
         "lifecycle-wizard": ("playwrightcli.flows.lifecycle_wizard_flow", "LifecycleWizardFlow"),
         "layer2-wizard":    ("playwrightcli.flows.layer2_wizard_flow",    "Layer2WizardFlow"),
         "wizard-session":   ("playwrightcli.flows.wizard_session_flow",   "WizardSessionFlow"),
+        "health":           ("playwrightcli.flows.health_flow",            "HealthFlow"),
     }
     module_path, class_name = flow_map[name]
     import importlib
@@ -85,7 +86,7 @@ async def _run_portal(
         page = await ctx.new_page()
         try:
             # Standalone flows — no portal config or observer queue
-            if name in ("scope", "rbac", "lifecycle-wizard", "layer2-wizard", "wizard-session"):
+            if name in ("scope", "rbac", "lifecycle-wizard", "layer2-wizard", "wizard-session", "health"):
                 flow = FlowClass(page=page, runner=runner, verifier=verifier)
             else:
                 flow = FlowClass(
@@ -153,6 +154,7 @@ def _dry_run(portal_names: list[str], mm: MemoryManager, verify: bool = False) -
     from playwrightcli.flows.lifecycle_wizard_flow import LIFECYCLE_WIZARD_STEPS
     from playwrightcli.flows.layer2_wizard_flow import LAYER2_WIZARD_STEPS
     from playwrightcli.flows.wizard_session_flow import WIZARD_SESSION_STEPS
+    from playwrightcli.flows.health_flow import HEALTH_STEPS
 
     step_map = {
         "pam":              PAM_STEPS,
@@ -163,6 +165,7 @@ def _dry_run(portal_names: list[str], mm: MemoryManager, verify: bool = False) -
         "lifecycle-wizard": LIFECYCLE_WIZARD_STEPS,
         "layer2-wizard":    LAYER2_WIZARD_STEPS,
         "wizard-session":   WIZARD_SESSION_STEPS,
+        "health":           HEALTH_STEPS,
     }
 
     # Requirement IDs that will be checked per step
@@ -220,6 +223,11 @@ def _dry_run(portal_names: list[str], mm: MemoryManager, verify: bool = False) -
         "wizard-session::resume-lifecycle": ["WIZ-SESS-03"],
         "wizard-session::resume-layer2":    ["WIZ-SESS-04"],
         "wizard-session::verify-both-db":   ["WIZ-SESS-02"],
+        # Health
+        "health::pam":      ["HEALTH-HTMX-01..02", "HEALTH-SRI-01..02", "HEALTH-BTN-01..02", "HEALTH-CONSOLE-01", "HEALTH-ASSET-01..03"],
+        "health::meredith": ["HEALTH-HTMX-01..02", "HEALTH-SRI-01..02", "HEALTH-BTN-01..02", "HEALTH-CONSOLE-01", "HEALTH-ASSET-01..03"],
+        "health::chrissy":  ["HEALTH-HTMX-01..02", "HEALTH-SRI-01..02", "HEALTH-BTN-01..02", "HEALTH-CONSOLE-01", "HEALTH-ASSET-01..03"],
+        "health::wizard":   ["HEALTH-WIZ-01..02", "HEALTH-CONSOLE-02"],
     }
 
     print("\n--- DRY RUN (no browser opened) ---\n")
@@ -275,7 +283,7 @@ def main() -> None:
     parser.add_argument(
         "--portal",
         choices=["pam", "meredith", "chrissy", "scope", "rbac",
-                 "lifecycle-wizard", "layer2-wizard", "wizard-session", "all"],
+                 "lifecycle-wizard", "layer2-wizard", "wizard-session", "health", "all"],
         default="all",
         help="Which portal(s) to test (default: all)",
     )
@@ -343,7 +351,7 @@ def main() -> None:
 
     portal_names = (
         ["pam", "meredith", "chrissy", "scope", "rbac",
-         "lifecycle-wizard", "layer2-wizard", "wizard-session"]
+         "lifecycle-wizard", "layer2-wizard", "wizard-session", "health"]
         if args.portal == "all" else [args.portal]
     )
 
