@@ -2,10 +2,12 @@
 
 ## Project State
 
-Sprints 1–6 are complete. playwrightcli Steps #1–8 and #10 are complete (112 checks, 35 steps, 0 failures).
-See `DECISIONS.md` (ADR-001 through ADR-031) for the authoritative record of every
-architectural decision made during Sprints 1–6 and the playwrightcli hardening work.
-See `TODO.md` for Step #9 (deferred) and root-level engineering to-dos.
+Sprints 1–6 are complete. playwrightcli Steps #1–8 and #10 are complete.
+Wizard Refactoring (Phases A–P) is complete: two-wizard architecture replacing PDF upload,
+23 new requirement checks (LC-WIZ, L2-WIZ, WIZ-SESS, DEPR), 3 SIG-YAML1 checks marked SKIP.
+See `DECISIONS.md` (ADR-001 through ADR-036) for the authoritative record of every
+architectural decision made during Sprints 1–6, playwrightcli hardening, and the wizard refactoring.
+See `TODO.md` for Step #9 (deferred), wizard-deferred items, and root-level engineering to-dos.
 
 ## Architecture Invariants — NEVER VIOLATE
 - INV-01: Agents never import each other. S3 is the only inter-agent channel.
@@ -90,8 +92,8 @@ Auth on all portals: /login, /token, /token/refresh, /logout, /change-password, 
 - `agents/moses.py` — EDI validation (deterministic). Lifecycle hook via _extract_po_from_edi() regex (ADR-012)
 - `agents/monica.py` — Orchestrator. Escalation → HITL queue DB write (ADR-022, psycopg2 sync)
 - `agents/kelly.py` — Communications. Real dispatch: SMTP, Google Chat, Teams (ADR-020). Gemini Flash-Lite memory (ADR-024)
-- `agents/andy.py` — YAML mapper (3 ingestion paths)
-- `agents/dwight.py` — PDF spec analyst (GPT-4o)
+- `agents/andy.py` — YAML mapper (3 ingestion paths; Path 1 deprecated per ADR-032, returns 410)
+- `agents/dwight.py` — PDF spec analyst (GPT-4o; disconnected from Meredith per ADR-032, deferred to TODO)
 - `agents/ryan.py` — Patch generator (GPT-4o-mini)
 
 ## Database
@@ -131,8 +133,8 @@ Auth on all portals: /login, /token, /token/refresh, /logout, /change-password, 
 
 Run: `python -m testing.certportal_jules_test`
 
-## playwrightcli E2E Harness (Steps #1–8, #10 complete)
-Self-correcting Playwright CLI with requirements verification. 112 checks, 35 steps, 0 failures.
+## playwrightcli E2E Harness (Steps #1–8, #10 + Wizard Flows complete)
+Self-correcting Playwright CLI with requirements verification.
 
 ### Steps completed
 - **Step #1** — `playwrightcli/fixtures/seed.sql`: idempotent test data for all 9 previously-skipped checks
@@ -143,15 +145,20 @@ Self-correcting Playwright CLI with requirements verification. 112 checks, 35 st
 - **Step #6** — JWT revocation E2E: logout → protected route blocked → new login succeeds (JWT-REV-01..03)
 - **Step #7** — RBAC cross-portal: supplier→PAM blocked, retailer→Chrissy blocked, supplier→Meredith blocked (RBAC-01..03)
 - **Step #8** — Certification full flow: cert_supplier (gate_3=CERTIFIED) sees badge on dashboard + /certification (CHR-CERT-03..04)
-- **Step #10** — Andy Path 1 & 3 signals: full signal coverage for all 3 YAML wizard paths (SIG-YAML1/YAML3-01..03)
+- **Step #10** — Andy Path 3 signals + Path 1 deprecated: SIG-YAML3-01..03 active; SIG-YAML1-01..03 SKIP (ADR-032)
+- **Wizard Flows** — Lifecycle wizard E2E (LC-WIZ-01..08), Layer 2 wizard E2E (L2-WIZ-01..09), wizard session persistence (WIZ-SESS-01..04), deprecation checks (DEPR-01..02)
 
 ### Key files
-- `playwrightcli/fixtures/seed.sql`          — idempotent test data (apply before first run)
-- `playwrightcli/fixtures/signal_checker.py` — standalone S3 signal scanner (no main codebase imports)
-- `playwrightcli/fixtures/token_fetcher.py`  — standalone DB reader for password_reset_tokens
-- `playwrightcli/flows/scope_flow.py`        — scope isolation + cert full flow (standalone, no BaseFlow)
-- `playwrightcli/flows/rbac_flow.py`         — RBAC cross-portal enforcement (standalone, no BaseFlow)
-- `playwrightcli/requirements_verifier.py`   — all verify_* methods; accumulates PASS/FAIL/SKIP
+- `playwrightcli/fixtures/seed.sql`            — idempotent test data (apply before first run)
+- `playwrightcli/fixtures/signal_checker.py`   — standalone S3 signal scanner (no main codebase imports)
+- `playwrightcli/fixtures/artifact_checker.py` — standalone S3 artifact checker (no main codebase imports)
+- `playwrightcli/fixtures/token_fetcher.py`    — standalone DB reader for password_reset_tokens
+- `playwrightcli/flows/scope_flow.py`          — scope isolation + cert full flow (standalone, no BaseFlow)
+- `playwrightcli/flows/rbac_flow.py`           — RBAC cross-portal enforcement (standalone, no BaseFlow)
+- `playwrightcli/flows/lifecycle_wizard_flow.py` — lifecycle wizard E2E (standalone, no BaseFlow)
+- `playwrightcli/flows/layer2_wizard_flow.py`  — Layer 2 YAML wizard E2E (standalone, no BaseFlow)
+- `playwrightcli/flows/wizard_session_flow.py` — multi-session persistence E2E (standalone, no BaseFlow)
+- `playwrightcli/requirements_verifier.py`     — all verify_* methods; accumulates PASS/FAIL/SKIP
 
 ### Isolation constraint (ADR-027)
 playwrightcli/ must NEVER import from certportal/, portals/, agents/, or lifecycle_engine/.
@@ -173,10 +180,15 @@ python -m playwrightcli --portal all --verify --dry-run
 ```
 
 ## Key File Locations
-- edi_framework/lifecycle/order_to_cash.yaml  — state machine definition
-- edi_framework/lowes_master.yaml             — transaction registry
-- pyedi_core/config/config.yaml              — parser runtime config (partner_id: lowes)
-- lifecycle_engine/config.yaml               — engine config (strict_mode profiles)
-- certportal/core/auth.py                    — JWT + bcrypt + revocation + password reset
-- certportal/core/email_utils.py             — SMTP helper for reset emails
-- playwrightcli/fixtures/seed.sql            — E2E test data seed (apply before harness)
+- edi_framework/lifecycle/order_to_cash.yaml   — state machine definition
+- edi_framework/lowes_master.yaml              — transaction registry
+- edi_framework/partner_registry.yaml          — white-label partner registry (Layer 0)
+- edi_framework/templates/layer2_presets.yaml  — competitive advantage presets
+- pyedi_core/config/config.yaml               — parser runtime config (partner_id: lowes)
+- lifecycle_engine/config.yaml                — engine config (strict_mode profiles)
+- certportal/core/auth.py                     — JWT + bcrypt + revocation + password reset
+- certportal/core/email_utils.py              — SMTP helper for reset emails
+- certportal/generators/spec_builder.py       — Layer 1 + Layer 2 merge → artifacts
+- certportal/generators/x12_source.py         — dynamic X12 definition loader (pyx12 + Stedi)
+- playwrightcli/fixtures/seed.sql             — E2E test data seed (apply before harness)
+- instructions/wizard_refactoring_prompt.md   — approved wizard refactoring spec (Phases A–P)

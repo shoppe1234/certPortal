@@ -1,8 +1,10 @@
-# certPortal — Architectural Decision Record (Sprint 1–6 + playwrightcli Steps #1–8, #10)
+# certPortal — Architectural Decision Record (Sprint 1–6 + playwrightcli Steps #1–8, #10 + Wizard Refactoring)
 
-Decisions made during Sprints 1–6 and the playwrightcli hardening work that were not
-explicitly covered by the build prompt.
+Decisions made during Sprints 1–6, the playwrightcli hardening work, and the Wizard
+Refactoring (Phases A–P) that were not explicitly covered by the build prompt.
 All choices favour the most conservative, explicit, auditable option.
+ADR-001 through ADR-031: Sprints 1–6 + playwrightcli.
+ADR-032 through ADR-036: Wizard Refactoring (two-wizard architecture, X12 sourcing, partner registry, artifacts, sessions).
 
 ---
 

@@ -1,6 +1,7 @@
 # certPortal — TODO
 
-Sprints 1–6 complete. playwrightcli Steps #1–8, #10 complete (112 checks, 35 steps, all PASS).
+Sprints 1–6 complete. playwrightcli Steps #1–8, #10 complete.
+Wizard Refactoring (Phases A–P) complete: two-wizard architecture, 23 new requirement checks.
 Items below are the next logical layer of work, grouped by category.
 
 ---
@@ -39,10 +40,17 @@ MON-ESC-02  Monica reads signal and writes PENDING_APPROVAL item to hitl_queue
 MON-ESC-03  New HITL item visible in PAM /hitl-queue for the correct supplier
 ```
 
-### ~~Step #10 — Andy Path 1 & Path 3 Signals~~ ✓ COMPLETE
-Added `meredith::yaml-wizard-path1-signal` and `meredith::yaml-wizard-path3-signal` steps to `meredith_flow.py`.
-POST /yaml-wizard/path1 and /path3, verify respective S3 andy_pathN_trigger_*.json signals.
-Requirements: SIG-YAML1-01..03, SIG-YAML3-01..03 (6 checks).
+### ~~Step #10 — Andy Path 1 & Path 3 Signals~~ ✓ COMPLETE (Path 1 now deprecated)
+Added `meredith::yaml-wizard-path3-signal` step to `meredith_flow.py`.
+Path 1 deprecated per ADR-032 (returns 410 Gone). SIG-YAML1-01..03 marked SKIP.
+Path 3 active: SIG-YAML3-01..03 (3 checks). Deprecation checks: DEPR-01..02 (2 checks).
+
+### ~~Step #11 — Wizard E2E Flows~~ ✓ COMPLETE (Wizard Refactoring Phase P)
+Three new standalone flows added:
+- `lifecycle_wizard_flow.py` — Lifecycle wizard end-to-end (LC-WIZ-01..08, 8 checks)
+- `layer2_wizard_flow.py` — Layer 2 YAML wizard end-to-end (L2-WIZ-01..09, 9 checks)
+- `wizard_session_flow.py` — Multi-session persistence (WIZ-SESS-01..04, 4 checks)
+New fixture: `artifact_checker.py` (standalone S3 artifact checker, ADR-027 compliant).
 
 ---
 
@@ -61,10 +69,10 @@ Items that belong in the main codebase, not in the test harness.
 **CI/CD Pipeline** (`.github/workflows/portals.yml`)
 - Currently only `edi_ci.yml` exists (validates edi_framework/ YAMLs)
 - Add: install deps → run migrations → start portals → run Playwright harness (`--headless --verify`)
-- Blocks PRs that break any of the 97 requirement checks
+- Blocks PRs that break any requirement checks
 
 **Database Migration Tooling** (`scripts/migrate.py`)
-- A single script that applies all 6 migration files in order
+- A single script that applies all 8 migration files in order
 - Currently documented in CLAUDE.md but requires manual `psql` calls
 - Idempotent (IF NOT EXISTS guards already in place)
 
@@ -140,11 +148,11 @@ Items that belong in the main codebase, not in the test harness.
 
 ### Agent Completeness
 
-**Dwight E2E Test**
+**Dwight E2E Test** *(blocked — Dwight disconnected from Meredith per ADR-032)*
 - `agents/dwight.py` is built but has no Playwright-layer test
-- Add a test fixture PDF (`playwrightcli/fixtures/test_spec.pdf`)
-- POST it via Meredith `/spec-setup/upload` and verify Dwight writes a `thesis.md` to S3
-- Currently Dwight is only unit-tested via Suite B
+- `POST /spec-setup/upload` now returns 410 Gone — Dwight trigger removed
+- Deferred until Dwight re-incorporation (see "Deferred — Wizard Refactoring" below)
+- When re-enabled: add test fixture PDF, POST via reconnected route, verify THESIS.md in S3
 
 **Kelly Dispatch Verification**
 - Kelly real dispatch (SMTP, Google Chat, Teams) is tested in Suite I (Gemini memory consolidation)
@@ -196,13 +204,17 @@ Items that belong in the main codebase, not in the test harness.
 ```
 python -m playwrightcli --portal all --verify --headless
 
-PAM      40 checks  (auth, dashboard, retailers, suppliers, HITL, gate enforcement, password reset, JWT revocation, memory)
-MEREDITH 24 checks  (auth, spec setup, supplier status, YAML wizard signals path 2/3; SIG-YAML1 SKIP — Path 1 deprecated)
-CHRISSY  30 checks  (auth, dashboard, scenarios, errors, patches, patch signal, certification)
-SCOPE    14 checks  (supplier A/B isolation, retailer A/B isolation, cert full flow)
-RBAC      3 checks  (supplier→PAM, retailer→Chrissy, supplier→Meredith)
-──────────────────
-TOTAL   111 checks  0 FAIL  0 SKIP
+PAM            40 checks  (auth, dashboard, retailers, suppliers, HITL, gate enforcement, password reset, JWT revocation, memory)
+MEREDITH       24 checks  (auth, spec setup, supplier status, YAML wizard signals path 2/3; SIG-YAML1 SKIP — Path 1 deprecated ADR-032)
+CHRISSY        30 checks  (auth, dashboard, scenarios, errors, patches, patch signal, certification)
+SCOPE          14 checks  (supplier A/B isolation, retailer A/B isolation, cert full flow)
+RBAC            3 checks  (supplier→PAM, retailer→Chrissy, supplier→Meredith)
+LIFECYCLE-WIZ   8 checks  (LC-WIZ-01..08: page load, version dropdown, tx checkboxes, modes, generate, S3, DB session, resume)
+LAYER2-WIZ      9 checks  (L2-WIZ-01..09: presets, segments, overrides, YAML, artifacts, annotations, download, DB, resume)
+WIZARD-SESSION  4 checks  (WIZ-SESS-01..04: session create, state JSON, resume step, multiple sessions)
+DEPRECATION     2 checks  (DEPR-01..02: /spec-setup/upload 410, /yaml-wizard/path1 410)
+────────────────────────
+TOTAL         134 checks
 ```
 
-(Note: 112 requirement checks total — SIG-YAML1/YAML3 S3 checks are SKIP when S3 unavailable; HTTP checks always run.)
+(Note: SIG-YAML1 S3 checks are SKIP — Path 1 deprecated. SIG-YAML3 S3 checks degrade to SKIP when S3 unavailable.)
