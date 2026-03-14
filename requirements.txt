@@ -24,3 +24,6 @@ requests>=2.31
 google-generativeai>=0.8
 anthropic>=0.39
 pyx12>=2.3
+markdown>=3.5
+fpdf2>=2.7
+# weasyprint>=60.0  # optional: high-fidelity PDF; requires system libs (cairo, pango)
