@@ -32,8 +32,8 @@ def _preflight(portal_names: list[str]) -> bool:
     """HTTP GET /health for each portal. Returns True if all respond 200."""
     all_ok = True
     for name in portal_names:
-        if name in ("scope", "rbac"):
-            continue  # scope/rbac check portals already covered by pam/meredith/chrissy
+        if name in ("scope", "rbac", "lifecycle-wizard", "layer2-wizard", "wizard-session"):
+            continue  # standalone flows check portals already covered by pam/meredith/chrissy
         url = PORTALS[name]["url"] + "/health"
         try:
             with urllib.request.urlopen(url, timeout=TIMEOUTS["preflight"]) as resp:
@@ -65,11 +65,14 @@ async def _run_portal(
     from playwright.async_api import async_playwright
 
     flow_map = {
-        "pam":      ("playwrightcli.flows.pam_flow",      "PamFlow"),
-        "meredith": ("playwrightcli.flows.meredith_flow", "MeredithFlow"),
-        "chrissy":  ("playwrightcli.flows.chrissy_flow",  "ChrissyFlow"),
-        "scope":    ("playwrightcli.flows.scope_flow",    "ScopeFlow"),
-        "rbac":     ("playwrightcli.flows.rbac_flow",     "RbacFlow"),
+        "pam":              ("playwrightcli.flows.pam_flow",              "PamFlow"),
+        "meredith":         ("playwrightcli.flows.meredith_flow",         "MeredithFlow"),
+        "chrissy":          ("playwrightcli.flows.chrissy_flow",          "ChrissyFlow"),
+        "scope":            ("playwrightcli.flows.scope_flow",            "ScopeFlow"),
+        "rbac":             ("playwrightcli.flows.rbac_flow",             "RbacFlow"),
+        "lifecycle-wizard": ("playwrightcli.flows.lifecycle_wizard_flow", "LifecycleWizardFlow"),
+        "layer2-wizard":    ("playwrightcli.flows.layer2_wizard_flow",    "Layer2WizardFlow"),
+        "wizard-session":   ("playwrightcli.flows.wizard_session_flow",   "WizardSessionFlow"),
     }
     module_path, class_name = flow_map[name]
     import importlib
@@ -81,8 +84,8 @@ async def _run_portal(
         ctx = await browser.new_context()
         page = await ctx.new_page()
         try:
-            # ScopeFlow / RbacFlow are standalone — no portal config or observer queue
-            if name in ("scope", "rbac"):
+            # Standalone flows — no portal config or observer queue
+            if name in ("scope", "rbac", "lifecycle-wizard", "layer2-wizard", "wizard-session"):
                 flow = FlowClass(page=page, runner=runner, verifier=verifier)
             else:
                 flow = FlowClass(
@@ -147,13 +150,19 @@ def _dry_run(portal_names: list[str], mm: MemoryManager, verify: bool = False) -
     from playwrightcli.flows.chrissy_flow import CHRISSY_STEPS
     from playwrightcli.flows.scope_flow import SCOPE_STEPS
     from playwrightcli.flows.rbac_flow import RBAC_STEPS
+    from playwrightcli.flows.lifecycle_wizard_flow import LIFECYCLE_WIZARD_STEPS
+    from playwrightcli.flows.layer2_wizard_flow import LAYER2_WIZARD_STEPS
+    from playwrightcli.flows.wizard_session_flow import WIZARD_SESSION_STEPS
 
     step_map = {
-        "pam":      PAM_STEPS,
-        "meredith": MEREDITH_STEPS,
-        "chrissy":  CHRISSY_STEPS,
-        "scope":    SCOPE_STEPS,
-        "rbac":     RBAC_STEPS,
+        "pam":              PAM_STEPS,
+        "meredith":         MEREDITH_STEPS,
+        "chrissy":          CHRISSY_STEPS,
+        "scope":            SCOPE_STEPS,
+        "rbac":             RBAC_STEPS,
+        "lifecycle-wizard": LIFECYCLE_WIZARD_STEPS,
+        "layer2-wizard":    LAYER2_WIZARD_STEPS,
+        "wizard-session":   WIZARD_SESSION_STEPS,
     }
 
     # Requirement IDs that will be checked per step
@@ -171,7 +180,8 @@ def _dry_run(portal_names: list[str], mm: MemoryManager, verify: bool = False) -
         "meredith::spec-setup": ["MER-SPEC-01..05"],
         "meredith::supplier-status": ["MER-STATUS-01..05"],
         "meredith::yaml-wizard-signal": ["SIG-YAML2-01..03"],
-        "meredith::yaml-wizard-path1-signal": ["SIG-YAML1-01..03"],
+        "meredith::deprecated-path1": ["DEPR-02"],
+        "meredith::deprecated-upload": ["DEPR-01"],
         "meredith::yaml-wizard-path3-signal": ["SIG-YAML3-01..03"],
         "chrissy::login": ["CHR-AUTH-02,04", "CHR-DASH-01..05", "XPORT-02,03,05"],
         "chrissy::scenarios": ["CHR-SCEN-01..05"],
@@ -190,6 +200,26 @@ def _dry_run(portal_names: list[str], mm: MemoryManager, verify: bool = False) -
         "rbac::supplier-rejects-admin-route":    ["RBAC-01"],
         "rbac::retailer-rejects-supplier-route": ["RBAC-02"],
         "rbac::supplier-rejects-retailer-route": ["RBAC-03"],
+        # Lifecycle Wizard
+        "lifecycle-wizard::landing":        ["LC-WIZ-01"],
+        "lifecycle-wizard::version-select": ["LC-WIZ-02"],
+        "lifecycle-wizard::tx-select":      ["LC-WIZ-03"],
+        "lifecycle-wizard::mode-select":    ["LC-WIZ-04"],
+        "lifecycle-wizard::generate":       ["LC-WIZ-05", "LC-WIZ-06"],
+        "lifecycle-wizard::verify-db":      ["LC-WIZ-07"],
+        "lifecycle-wizard::resume":         ["LC-WIZ-08"],
+        # Layer 2 Wizard
+        "layer2-wizard::preset-select":       ["L2-WIZ-01"],
+        "layer2-wizard::segment-config":      ["L2-WIZ-02"],
+        "layer2-wizard::generate-yaml":       ["L2-WIZ-03", "L2-WIZ-04"],
+        "layer2-wizard::generate-artifacts":  ["L2-WIZ-05", "L2-WIZ-06"],
+        "layer2-wizard::download":            ["L2-WIZ-07"],
+        "layer2-wizard::verify-db":           ["L2-WIZ-08", "L2-WIZ-09"],
+        # Wizard Session
+        "wizard-session::start-lifecycle":  ["WIZ-SESS-01"],
+        "wizard-session::resume-lifecycle": ["WIZ-SESS-03"],
+        "wizard-session::resume-layer2":    ["WIZ-SESS-04"],
+        "wizard-session::verify-both-db":   ["WIZ-SESS-02"],
     }
 
     print("\n--- DRY RUN (no browser opened) ---\n")
@@ -244,7 +274,8 @@ def main() -> None:
     )
     parser.add_argument(
         "--portal",
-        choices=["pam", "meredith", "chrissy", "scope", "rbac", "all"],
+        choices=["pam", "meredith", "chrissy", "scope", "rbac",
+                 "lifecycle-wizard", "layer2-wizard", "wizard-session", "all"],
         default="all",
         help="Which portal(s) to test (default: all)",
     )
@@ -311,7 +342,9 @@ def main() -> None:
         return
 
     portal_names = (
-        ["pam", "meredith", "chrissy", "scope", "rbac"] if args.portal == "all" else [args.portal]
+        ["pam", "meredith", "chrissy", "scope", "rbac",
+         "lifecycle-wizard", "layer2-wizard", "wizard-session"]
+        if args.portal == "all" else [args.portal]
     )
 
     # Auto-consolidate so this run benefits from previous feedback

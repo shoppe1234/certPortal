@@ -882,43 +882,10 @@ class RequirementsVerifier:
         ts: float,
         response: dict,
     ) -> None:
-        """SIG-YAML1-*: YAML Wizard Path 1 POST + S3 andy_path1_trigger signal."""
-        sc = self.signal_checker
-
-        http_ok = response.get("ok", False) and response.get("status") == 200
-        self._record(
-            "SIG-YAML1-01",
-            "YAML Wizard Path 1 POST returns HTTP 200",
-            http_ok,
-            f"HTTP {response.get('status', '?')}",
-        )
-
-        if sc is None:
-            self._skip("SIG-YAML1-02", "andy_path1_trigger_*.json signal written to S3", "S3 checker unavailable")
-            self._skip("SIG-YAML1-03", "Signal payload has type=andy_yaml_path1 and retailer_slug", "S3 checker unavailable")
-            return
-
-        signals = sc.list_signals_since("lowes/system/signals/andy_path1_trigger_", ts)
-        has_signal = len(signals) > 0
-        self._record(
-            "SIG-YAML1-02",
-            "andy_path1_trigger_*.json signal written to S3",
-            has_signal,
-            f"Found {len(signals)} signal(s) in lowes/system/signals/",
-        )
-
-        if has_signal:
-            payload = sc.get_object_json(signals[0]["Key"]) or {}
-            correct_type = payload.get("type") == "andy_yaml_path1"
-            correct_retailer = payload.get("retailer_slug") == "lowes"
-            self._record(
-                "SIG-YAML1-03",
-                "Signal payload has type=andy_yaml_path1 and retailer_slug=lowes",
-                correct_type and correct_retailer,
-                f"type={payload.get('type')!r} retailer_slug={payload.get('retailer_slug')!r}",
-            )
-        else:
-            self._skip("SIG-YAML1-03", "Signal payload has type=andy_yaml_path1 and retailer_slug=lowes", "No signal found")
+        """SIG-YAML1-*: YAML Wizard Path 1 — DEPRECATED (ADR-032). All checks SKIP."""
+        self._skip("SIG-YAML1-01", "YAML Wizard Path 1 POST returns HTTP 200", "Path 1 deprecated (ADR-032)")
+        self._skip("SIG-YAML1-02", "andy_path1_trigger_*.json signal written to S3", "Path 1 deprecated (ADR-032)")
+        self._skip("SIG-YAML1-03", "Signal payload has type=andy_yaml_path1 and retailer_slug", "Path 1 deprecated (ADR-032)")
 
     async def verify_signals_yaml_path3(
         self,
@@ -1057,6 +1024,240 @@ class RequirementsVerifier:
             )
         else:
             self._skip("SIG-HITL-03", "Signal payload has queue_id, draft, and channel", "No signal found")
+
+    # ------------------------------------------------------------------
+    # Lifecycle Wizard verification (LC-WIZ-01..08)
+    # ------------------------------------------------------------------
+
+    async def verify_lifecycle_wizard_page(self, page) -> None:
+        """LC-WIZ-01: Lifecycle wizard page loads (HTTP 200, contains 'Lifecycle Wizard')."""
+        body_text = (await page.text_content("body") or "").lower()
+        has_title = "lifecycle wizard" in body_text or "lifecycle" in body_text
+        self._record("LC-WIZ-01", "Lifecycle wizard page loads", has_title)
+
+    async def verify_lifecycle_wizard_version_dropdown(self, page) -> None:
+        """LC-WIZ-02: Version dropdown renders with at least one option."""
+        options = await page.query_selector_all('select option, [data-version], .version-option')
+        self._record(
+            "LC-WIZ-02",
+            "Version dropdown renders with at least one option",
+            len(options) > 0,
+            f"Found {len(options)} option(s)",
+        )
+
+    async def verify_lifecycle_wizard_tx_checkboxes(self, page) -> None:
+        """LC-WIZ-03: Transaction checkboxes render for selected version."""
+        checkboxes = await page.query_selector_all(
+            'input[type="checkbox"][name*="transaction"], input[type="checkbox"][value*="85"], '
+            'input[type="checkbox"][value*="81"]'
+        )
+        self._record(
+            "LC-WIZ-03",
+            "Transaction checkboxes render for selected version",
+            len(checkboxes) > 0,
+            f"Found {len(checkboxes)} checkbox(es)",
+        )
+
+    async def verify_lifecycle_wizard_mode_selector(self, page) -> None:
+        """LC-WIZ-04: Mode selector shows three options (use/copy/create)."""
+        body_text = (await page.text_content("body") or "").lower()
+        has_use = "use" in body_text
+        has_copy = "copy" in body_text or "clone" in body_text
+        has_create = "create" in body_text or "new" in body_text
+        modes_found = sum([has_use, has_copy, has_create])
+        self._record(
+            "LC-WIZ-04",
+            "Mode selector shows three options (use/copy/create)",
+            modes_found >= 2,
+            f"Found {modes_found}/3 modes",
+        )
+
+    def verify_lifecycle_wizard_generate(self, status_code: int) -> None:
+        """LC-WIZ-05: Generate returns HTTP 200."""
+        self._record(
+            "LC-WIZ-05",
+            "Lifecycle wizard generate returns HTTP 200",
+            status_code == 200,
+            f"HTTP {status_code}",
+        )
+
+    def verify_lifecycle_wizard_s3(self, artifact_exists: bool) -> None:
+        """LC-WIZ-06: Lifecycle YAML exists in S3 after generation."""
+        self._record(
+            "LC-WIZ-06",
+            "Lifecycle YAML exists in S3 after generation",
+            artifact_exists,
+        )
+
+    def verify_lifecycle_wizard_db_session(self, session_exists: bool) -> None:
+        """LC-WIZ-07: wizard_sessions row created in DB."""
+        self._record(
+            "LC-WIZ-07",
+            "wizard_sessions row created in DB",
+            session_exists,
+        )
+
+    def verify_lifecycle_wizard_resume(self, resumed_at_correct_step: bool) -> None:
+        """LC-WIZ-08: Resume loads correct step (navigate away and return)."""
+        self._record(
+            "LC-WIZ-08",
+            "Resume loads correct step",
+            resumed_at_correct_step,
+        )
+
+    # ------------------------------------------------------------------
+    # Layer 2 Wizard verification (L2-WIZ-01..09)
+    # ------------------------------------------------------------------
+
+    async def verify_layer2_preset_selection(self, page) -> None:
+        """L2-WIZ-01: Preset selection renders three options."""
+        body_text = (await page.text_content("body") or "").lower()
+        presets = await page.query_selector_all(
+            'input[name*="preset"], select[name*="preset"] option, .preset-option, '
+            '[data-preset]'
+        )
+        has_standard = "standard" in body_text
+        has_minimal = "minimal" in body_text
+        has_blank = "blank" in body_text or "manual" in body_text
+        presets_found = max(len(presets), sum([has_standard, has_minimal, has_blank]))
+        self._record(
+            "L2-WIZ-01",
+            "Preset selection renders three options",
+            presets_found >= 2,
+            f"Found {presets_found} preset(s)",
+        )
+
+    async def verify_layer2_segment_accordions(self, page) -> None:
+        """L2-WIZ-02: Segment accordions render with element tables."""
+        accordions = await page.query_selector_all(
+            '.segment-accordion, details[data-segment], .accordion-segment, '
+            '[class*="segment"], details summary'
+        )
+        self._record(
+            "L2-WIZ-02",
+            "Segment accordions render with element tables",
+            len(accordions) > 0,
+            f"Found {len(accordions)} accordion(s)",
+        )
+
+    def verify_layer2_overrides(self, yaml_content: str, override_applied: bool) -> None:
+        """L2-WIZ-03: Overrides applied to generated YAML."""
+        self._record(
+            "L2-WIZ-03",
+            "Overrides applied to generated YAML",
+            override_applied,
+        )
+
+    def verify_layer2_yaml_valid(self, yaml_content: str) -> None:
+        """L2-WIZ-04: Generated YAML is valid (non-empty, contains transaction key)."""
+        has_content = bool(yaml_content and len(yaml_content) > 10)
+        self._record(
+            "L2-WIZ-04",
+            "Generated YAML is valid (non-empty, contains transaction key)",
+            has_content,
+            f"Length: {len(yaml_content) if yaml_content else 0}",
+        )
+
+    def verify_layer2_artifacts_generated(self, md_exists: bool) -> None:
+        """L2-WIZ-05: Artifacts generated (MD file exists)."""
+        self._record(
+            "L2-WIZ-05",
+            "Artifacts generated (MD file exists)",
+            md_exists,
+        )
+
+    def verify_layer2_annotations(self, content: str) -> None:
+        """L2-WIZ-06: Artifacts contain Layer 2 annotations."""
+        has_annotations = bool(content and ("layer 2" in content.lower() or "required" in content.lower()
+                               or "qualifier" in content.lower() or "retailer" in content.lower()))
+        self._record(
+            "L2-WIZ-06",
+            "Artifacts contain Layer 2 annotations",
+            has_annotations,
+        )
+
+    def verify_layer2_download(self, status_code: int, content_length: int) -> None:
+        """L2-WIZ-07: Download endpoint returns file content."""
+        self._record(
+            "L2-WIZ-07",
+            "Download endpoint returns file content",
+            status_code == 200 and content_length > 0,
+            f"HTTP {status_code}, {content_length} bytes",
+        )
+
+    def verify_layer2_db_session(self, session_exists: bool) -> None:
+        """L2-WIZ-08: wizard_sessions row created in DB."""
+        self._record(
+            "L2-WIZ-08",
+            "wizard_sessions row created in DB",
+            session_exists,
+        )
+
+    def verify_layer2_resume(self, resumed_at_correct_step: bool) -> None:
+        """L2-WIZ-09: Resume loads correct step."""
+        self._record(
+            "L2-WIZ-09",
+            "Resume loads correct step",
+            resumed_at_correct_step,
+        )
+
+    # ------------------------------------------------------------------
+    # Wizard Session verification (WIZ-SESS-01..04)
+    # ------------------------------------------------------------------
+
+    def verify_wizard_session_created(self, session_exists: bool) -> None:
+        """WIZ-SESS-01: Wizard session created in DB after starting wizard."""
+        self._record(
+            "WIZ-SESS-01",
+            "Wizard session created in DB after starting wizard",
+            session_exists,
+        )
+
+    def verify_wizard_session_state(self, state_has_data: bool) -> None:
+        """WIZ-SESS-02: Session state JSON contains step data."""
+        self._record(
+            "WIZ-SESS-02",
+            "Session state JSON contains step data",
+            state_has_data,
+        )
+
+    def verify_wizard_session_resume(self, resumed_at_correct_step: bool) -> None:
+        """WIZ-SESS-03: Resume navigates to correct step number."""
+        self._record(
+            "WIZ-SESS-03",
+            "Resume navigates to correct step number",
+            resumed_at_correct_step,
+        )
+
+    def verify_wizard_session_multiple(self, multiple_listed: bool) -> None:
+        """WIZ-SESS-04: Multiple active sessions listed on wizard landing page."""
+        self._record(
+            "WIZ-SESS-04",
+            "Multiple active sessions listed on wizard landing page",
+            multiple_listed,
+        )
+
+    # ------------------------------------------------------------------
+    # Deprecation verification (DEPR-01..02)
+    # ------------------------------------------------------------------
+
+    def verify_deprecation_spec_upload(self, status_code: int) -> None:
+        """DEPR-01: POST /spec-setup/upload returns HTTP 410."""
+        self._record(
+            "DEPR-01",
+            "POST /spec-setup/upload returns HTTP 410",
+            status_code == 410,
+            f"HTTP {status_code}",
+        )
+
+    def verify_deprecation_yaml_path1(self, status_code: int) -> None:
+        """DEPR-02: POST /yaml-wizard/path1 returns HTTP 410."""
+        self._record(
+            "DEPR-02",
+            "POST /yaml-wizard/path1 returns HTTP 410",
+            status_code == 410,
+            f"HTTP {status_code}",
+        )
 
     # ------------------------------------------------------------------
     # Dispatch — route step name to verification method

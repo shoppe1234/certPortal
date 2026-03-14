@@ -2,10 +2,11 @@
 
 Steps:
   meredith::login                    GET /login → fill form → POST /token → assert /
-  meredith::spec-setup               GET /spec-setup
+  meredith::spec-setup               GET /spec-setup (wizard entry points, not PDF upload)
   meredith::supplier-status          GET /supplier-status
   meredith::yaml-wizard-signal       POST /yaml-wizard/path2 → verify S3 andy_path2_trigger signal
-  meredith::yaml-wizard-path1-signal POST /yaml-wizard/path1 → verify S3 andy_path1_trigger signal
+  meredith::deprecated-path1         POST /yaml-wizard/path1 → verify HTTP 410 (DEPR-02)
+  meredith::deprecated-upload        POST /spec-setup/upload → verify HTTP 410 (DEPR-01)
   meredith::yaml-wizard-path3-signal POST /yaml-wizard/path3 → verify S3 andy_path3_trigger signal
   meredith::logout                   POST /logout → assert /login
 
@@ -28,7 +29,8 @@ MEREDITH_STEPS = [
     "spec-setup",
     "supplier-status",
     "yaml-wizard-signal",
-    "yaml-wizard-path1-signal",
+    "deprecated-path1",
+    "deprecated-upload",
     "yaml-wizard-path3-signal",
     "logout",
 ]
@@ -37,7 +39,8 @@ MEREDITH_STEPS = [
 HUMAN_GUIDANCE: dict[str, str] = {
     "spec-setup": (
         "Navigate to /spec-setup (Spec Setup in the nav). "
-        "Wait for the page to load — you should see a spec table or an empty state."
+        "Wait for the page to load — you should see wizard entry points "
+        "(Lifecycle Wizard, Layer 2 Wizard) instead of PDF upload."
     ),
     "supplier-status": (
         "Navigate to /supplier-status (Supplier Status in the nav). "
@@ -48,10 +51,13 @@ HUMAN_GUIDANCE: dict[str, str] = {
         "select bundle). Complete the form and submit. "
         "The harness will fire the API call automatically after you press Enter."
     ),
-    "yaml-wizard-path1-signal": (
-        "Navigate to /yaml-wizard and trigger Path 1 (upload a PDF spec). "
-        "Complete the form and submit. "
-        "The harness will fire the API call automatically after you press Enter."
+    "deprecated-path1": (
+        "The harness will POST /yaml-wizard/path1 and verify it returns HTTP 410 (Gone). "
+        "Path 1 (PDF upload) has been deprecated (ADR-032)."
+    ),
+    "deprecated-upload": (
+        "The harness will POST /spec-setup/upload and verify it returns HTTP 410 (Gone). "
+        "PDF upload has been deprecated (ADR-032)."
     ),
     "yaml-wizard-path3-signal": (
         "Navigate to /yaml-wizard and trigger Path 3 (manual segment overrides). "
@@ -93,7 +99,8 @@ class MeredithFlow(BaseFlow):
         await self.verify("supplier-status")
 
         await r.run_step(f"{pfx}yaml-wizard-signal",       self._yaml_wizard_signal,       page=p, relogin_fn=self.relogin)
-        await r.run_step(f"{pfx}yaml-wizard-path1-signal", self._yaml_wizard_path1_signal, page=p, relogin_fn=self.relogin)
+        await r.run_step(f"{pfx}deprecated-path1",         self._deprecated_path1,         page=p, relogin_fn=self.relogin)
+        await r.run_step(f"{pfx}deprecated-upload",        self._deprecated_upload,        page=p, relogin_fn=self.relogin)
         await r.run_step(f"{pfx}yaml-wizard-path3-signal", self._yaml_wizard_path3_signal, page=p, relogin_fn=self.relogin)
 
         await r.run_step(f"{pfx}logout", self._logout_step, max_retries=2, page=p)
@@ -112,9 +119,9 @@ class MeredithFlow(BaseFlow):
             await self.assert_page_ok()
             await self.wait_htmx()
 
-        # Assertions — run in both modes
+        # Assertions — verify wizard entry points render (not PDF upload)
         await self.page.wait_for_selector(
-            "table, .empty-state, main, h1, h2",
+            "main, h1, h2, .wizard-card, a[href*='lifecycle-wizard'], a[href*='yaml-wizard']",
             timeout=10_000,
         )
 
@@ -176,26 +183,18 @@ class MeredithFlow(BaseFlow):
 
         await self._verifier.verify_signals_yaml_path2(ts, response)
 
-    async def _yaml_wizard_path1_signal(self) -> None:
-        """POST /yaml-wizard/path1 via browser fetch, verify S3 andy_path1_trigger signal.
+    async def _deprecated_path1(self) -> None:
+        """POST /yaml-wizard/path1 — verify HTTP 410 (Path 1 deprecated, ADR-032).
 
-        SIG-YAML1-01: HTTP 200 returned.
-        SIG-YAML1-02: andy_path1_trigger_*.json written under lowes/system/signals/.
-        SIG-YAML1-03: Payload contains type=andy_yaml_path1 and retailer_slug=lowes.
+        DEPR-02: POST /yaml-wizard/path1 returns HTTP 410.
         """
         if self._verifier is None:
             return
 
         if self.human_mode:
-            ready = await self.await_human(HUMAN_GUIDANCE["yaml-wizard-path1-signal"], "meredith::yaml-wizard-path1-signal")
+            ready = await self.await_human(HUMAN_GUIDANCE["deprecated-path1"], "meredith::deprecated-path1")
             if not ready:
                 return
-            await self.assert_page_ok()
-        else:
-            await self.goto("/yaml-wizard")
-            await self.assert_page_ok()
-
-        ts = time.time() - 1
 
         response = await self.page.evaluate("""async () => {
             try {
@@ -207,14 +206,41 @@ class MeredithFlow(BaseFlow):
                         pdf_key: 'lowes/system/test_spec.pdf'
                     })
                 });
-                const body = await r.json();
-                return {ok: r.ok, status: r.status, body: body};
+                return {ok: r.ok, status: r.status};
             } catch (e) {
-                return {ok: false, status: 0, body: {}, error: String(e)};
+                return {ok: false, status: 0, error: String(e)};
             }
         }""")
 
-        await self._verifier.verify_signals_yaml_path1(ts, response)
+        self._verifier.verify_deprecation_yaml_path1(response.get("status", 0))
+
+    async def _deprecated_upload(self) -> None:
+        """POST /spec-setup/upload — verify HTTP 410 (PDF upload deprecated, ADR-032).
+
+        DEPR-01: POST /spec-setup/upload returns HTTP 410.
+        """
+        if self._verifier is None:
+            return
+
+        if self.human_mode:
+            ready = await self.await_human(HUMAN_GUIDANCE["deprecated-upload"], "meredith::deprecated-upload")
+            if not ready:
+                return
+
+        response = await self.page.evaluate("""async () => {
+            try {
+                const r = await fetch('/spec-setup/upload', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({retailer_slug: 'lowes'})
+                });
+                return {ok: r.ok, status: r.status};
+            } catch (e) {
+                return {ok: false, status: 0, error: String(e)};
+            }
+        }""")
+
+        self._verifier.verify_deprecation_spec_upload(response.get("status", 0))
 
     async def _yaml_wizard_path3_signal(self) -> None:
         """POST /yaml-wizard/path3 via browser fetch, verify S3 andy_path3_trigger signal.

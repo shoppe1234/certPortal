@@ -337,6 +337,41 @@ ON CONFLICT (supplier_id) DO UPDATE
         gate_3          = 'CERTIFIED',
         last_updated_by = 'seed';
 
+-- ===========================================================================
+-- WIZARD SESSIONS TEST DATA (Phase P — wizard E2E flows)
+--
+-- 1 completed lifecycle session and 1 in-progress layer2 session for the
+-- test retailer (lowes_retailer). Used by wizard_session_flow.py to verify
+-- that seed data renders on wizard landing pages.
+--
+-- Uses fixed UUIDs for idempotent ON CONFLICT handling.
+-- ===========================================================================
+
+INSERT INTO wizard_sessions (id, retailer_slug, wizard_type, session_name, step_number, state_json, x12_version, completed_at)
+VALUES (
+    'a0000000-0000-4000-8000-000000000001'::uuid,
+    'lowes',
+    'lifecycle',
+    'Seed Completed Lifecycle',
+    4,
+    '{"mode": "use", "x12_version": "004010", "transactions": ["850", "855", "856", "810"]}'::jsonb,
+    '004010',
+    NOW() - INTERVAL '1 day'
+)
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO wizard_sessions (id, retailer_slug, wizard_type, session_name, step_number, state_json, x12_version)
+VALUES (
+    'a0000000-0000-4000-8000-000000000002'::uuid,
+    'lowes',
+    'layer2',
+    'Seed In-Progress Layer2',
+    1,
+    '{"transaction_type": "850", "preset": "standard_retail"}'::jsonb,
+    '004010'
+)
+ON CONFLICT (id) DO NOTHING;
+
 DELETE FROM patch_suggestions
 WHERE supplier_slug = 'acme' AND error_code = 'SIG-TEST-01';
 
