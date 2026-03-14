@@ -261,14 +261,14 @@ class RequirementsVerifier:
 
         body_text = (await page.text_content("body") or "").lower()
 
-        # MER-SPEC-02: Upload form
-        upload_form = await page.query_selector(
-            'form[action*="upload"], form[action*="spec"], input[type="file"], '
-            'button:has-text("Upload"), button:has-text("upload"), '
-            '[hx-post*="upload"], [hx-post*="spec"]'
+        # MER-SPEC-02: Wizard entry points (replaced PDF upload per ADR-032)
+        wizard_entry = await page.query_selector(
+            '.wizard-card, a[href*="lifecycle-wizard"], a[href*="yaml-wizard"], '
+            'button:has-text("Lifecycle"), button:has-text("Layer 2"), '
+            '[href*="wizard"]'
         )
-        has_upload = upload_form is not None or "upload" in body_text
-        self._record("MER-SPEC-02", "Upload form for Trading Partner Guide PDF", has_upload)
+        has_wizard_entry = wizard_entry is not None or "lifecycle wizard" in body_text or "layer 2" in body_text
+        self._record("MER-SPEC-02", "Wizard entry points present (Lifecycle + Layer 2)", has_wizard_entry)
 
         # MER-SPEC-03: Retailer slug field
         retailer_input = await page.query_selector(
@@ -277,10 +277,10 @@ class RequirementsVerifier:
         has_retailer = retailer_input is not None or "retailer" in body_text
         self._record("MER-SPEC-03", "Retailer slug field present", has_retailer)
 
-        # MER-SPEC-04: Spec table or empty state
-        spec_content = await page.query_selector("table, .empty-state")
-        has_spec = spec_content is not None or "spec" in body_text or "thesis" in body_text
-        self._record("MER-SPEC-04", "Spec table or empty-state renders", has_spec)
+        # MER-SPEC-04: Spec table, artifact gallery, or empty state
+        spec_content = await page.query_selector("table, .empty-state, .artifact-card, .artifact-gallery")
+        has_spec = spec_content is not None or "spec" in body_text or "artifact" in body_text
+        self._record("MER-SPEC-04", "Spec table, artifact gallery, or empty-state renders", has_spec)
 
         # MER-SPEC-05: YAML Wizard link
         wizard_link = await page.query_selector(
