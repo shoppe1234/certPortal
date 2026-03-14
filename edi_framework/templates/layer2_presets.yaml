@@ -1,0 +1,767 @@
+# =============================================================================
+# LAYER 2 PRESETS — Bundle-Level Configuration Templates
+# =============================================================================
+# These presets provide ready-made Layer 2 configurations for the YAML wizard.
+# Each preset defines per-transaction-type: segment qualifier values, business
+# rules, and mapping references.
+#
+# Presets are loaded by certportal/generators/template_loader.py and merged
+# with user overrides by certportal/generators/layer2_builder.py.
+#
+# Architecture Decision: AD-6 from wizard refactoring prompt.
+# Constraint: NC-02 — YAML is the brain; no hardcoded transaction logic in .py.
+# =============================================================================
+
+presets:
+
+  # ===========================================================================
+  # STANDARD RETAIL — Derived from Lowe's transaction YAMLs
+  # ===========================================================================
+  # This is the recommended preset for typical retail order-to-cash flows.
+  # All qualifier values, business rules, and mapping defaults are extracted
+  # from the existing edi_framework/transactions/*.yaml files.
+  # ===========================================================================
+  standard_retail:
+    name: "Standard Retail"
+    description: >
+      Full order-to-cash configuration derived from Lowe's EDI specification.
+      Includes qualifier chains, quantity waterfall, N1 qualifier transforms,
+      FOB restrictions, and all turnaround mapping defaults.
+    recommended: true
+
+    transactions:
+
+      # -----------------------------------------------------------------------
+      # 850 — Stock Purchase Order (Inbound)
+      # -----------------------------------------------------------------------
+      "850":
+        segments:
+          BEG:
+            elements:
+              BEG01:
+                qualifier: "00"
+                note: "Original — Transaction Set Purpose Code"
+              BEG02:
+                allowed_codes: [SA, NS, SP]
+                note: "SA=Stand-alone, NS=New Store/Mixed, SP=Display Only"
+              BEG03:
+                constraints:
+                  max_digits: 9
+                  format: "zero-suppressed"
+              BEG05:
+                format: "CCYYMMDD"
+
+          CUR:
+            elements:
+              CUR01:
+                qualifier: "SE"
+                note: "Selling Party"
+              CUR02:
+                codelist_ref: currency_code
+            turnaround:
+              echo_entire_segment: true
+              echoes_to:
+                - { transaction: "810", segment: "CUR" }
+
+          REF:
+            elements:
+              REF01:
+                allowed_codes: [IA, WO, DP, AN]
+                note: "IA=Vendor Number, WO=RP Reference, DP=Department, AN=Truck Load"
+            business_rules:
+              - qualifier: IA
+                description: "Internal Vendor Number — always present"
+              - qualifier: WO
+                description: "Replenishment Program reference — echoes to 855"
+              - qualifier: DP
+                description: "Department number and name abbreviation"
+              - qualifier: AN
+                description: "VPXD Truck Load Number for cross-dock"
+
+          PER:
+            elements:
+              PER01:
+                allowed_codes: [BD, DC]
+                note: "BD=Buyer, DC=Delivery Contact"
+
+          FOB:
+            elements:
+              FOB01:
+                allowed_codes: [CC, PP]
+                note: "CC=Collect, PP=Prepaid"
+            turnaround:
+              field: FOB01
+              echoes_to:
+                - { transaction: "810", segment: "FOB", element: "FOB01" }
+
+          SAC:
+            elements:
+              SAC01:
+                allowed_codes: [R]
+              SAC02:
+                allowed_codes: [E740]
+            condition: "Only transmitted when BEG02=NS (New Store Opening)"
+
+          DTM:
+            elements:
+              DTM01:
+                allowed_codes: ["002", "010"]
+                note: "002=Delivery Requested, 010=Requested Ship"
+              DTM02:
+                format: "CCYYMMDD"
+
+          N1_loop:
+            overrides:
+              N103:
+                qualifier: "93"
+                note: "850 uses qualifier 93"
+            instances:
+              - qualifier_N101: ST
+                description: "Ship To (store or RDC)"
+                required: true
+              - qualifier_N101: MA
+                description: "Ultimate store destination (cross-dock only)"
+                required: false
+
+          PO1:
+            elements:
+              PO101:
+                note: "Line item sequence number"
+              PO102:
+                note: "Quantity ordered"
+              PO103:
+                codelist_ref: unit_of_measure
+              PO106:
+                qualifier: "CB"
+                note: "Buyer's Catalog Number (Lowe's SKU)"
+            turnaround:
+              preferred_echo: true
+              required_fields_on_810: [IT101, IT102, IT103, IT104, IT106, IT107]
+
+          CTT:
+            elements:
+              CTT01:
+                computed: "Count of PO1 line items"
+
+        business_rules:
+          - id: quantity_chain
+            name: "Quantity Waterfall"
+            description: "ordered (850) >= accepted (855) >= shipped (856) >= invoiced (810)"
+            enforcement: strict
+          - id: n1_qualifier_chain
+            name: "N1 Qualifier Transform"
+            description: "N103 changes across transactions: 93 (850/860) -> 94 (855/856) -> 92 (810)"
+            map:
+              "850": "93"
+              "860": "93"
+              "855": "94"
+              "856": "94"
+              "810": "92"
+          - id: fob_restriction
+            name: "FOB Payment Method Restriction"
+            description: "Only CC (Collect) and PP (Prepaid) are valid on 850/855/860"
+            allowed: [CC, PP]
+          - id: po_number_primary_key
+            name: "PO Number as Primary Key"
+            description: "PO number must appear on every document in the lifecycle"
+            max_digits: 9
+            format: "zero-suppressed"
+
+        mapping_refs:
+          - "mappings/850_to_855_turnaround.yaml"
+          - "mappings/850_to_856_turnaround.yaml"
+          - "mappings/850_to_810_turnaround.yaml"
+
+      # -----------------------------------------------------------------------
+      # 855 — PO Acknowledgment (Outbound)
+      # -----------------------------------------------------------------------
+      "855":
+        segments:
+          BAK:
+            elements:
+              BAK01:
+                allowed_codes: ["00", "01", "05", "06"]
+                note: "00=Original, 01=Cancel, 05=Replace, 06=Confirmation"
+              BAK02:
+                allowed_codes: [AC, AD, RJ]
+                note: "AC=Ack with change, AD=Ack no change, RJ=Rejected"
+              BAK03:
+                constraints:
+                  max_digits: 9
+                  format: "zero-suppressed, no spaces"
+              BAK04:
+                format: "CCYYMMDD"
+
+          REF:
+            elements:
+              REF01:
+                allowed_codes: [WO, AN]
+                note: "WO=RP Reference (required), AN=Truck Load (conditional)"
+            instances:
+              - qualifier: WO
+                description: "Replenishment Program Reference Number"
+                required: true
+              - qualifier: AN
+                description: "VPXD Cross-Dock Truck Load Number"
+                required: false
+
+          PER:
+            elements:
+              PER01:
+                qualifier: "OC"
+                note: "Order Contact"
+
+          FOB:
+            overrides:
+              FOB01:
+                allowed_codes: [CC, PP]
+                note: "855 only supports Collect and Prepaid"
+
+          DTM:
+            elements:
+              DTM01:
+                allowed_codes: ["010", "067", "068"]
+                note: "067=Current Schedule Delivery, 068=Current Schedule Ship, 010=Delayed Ship"
+
+          N1_loop:
+            overrides:
+              N102:
+                usage: not_used
+              N103:
+                qualifier: "94"
+                note: "855 uses qualifier 94"
+            instances:
+              - qualifier_N101: ST
+                description: "Ship To"
+                required: true
+              - qualifier_N101: MA
+                description: "Ultimate store (cross-dock only)"
+                required: false
+
+          PO1:
+            elements:
+              PO106:
+                allowed_codes: [CB, UP]
+                note: "Lowe's item number (CB) or UPC (UP)"
+
+          ACK:
+            elements:
+              ACK01:
+                allowed_codes: [IA, IQ, ID]
+                note: "IA=Accepted, IQ=Qty Changed, ID=Deleted"
+              ACK07:
+                qualifier: "CB"
+
+        business_rules:
+          - id: change_cancel_preconditions
+            name: "Change/Cancel Preconditions"
+            description: "Only pre-approved vendors may send changes or cancellations"
+          - id: replacement_rule
+            name: "Replacement Rule"
+            description: "BAK01=05 requires ALL items in the replacement"
+
+        mapping_refs:
+          - "mappings/850_to_855_turnaround.yaml"
+
+      # -----------------------------------------------------------------------
+      # 856 — Advance Ship Notice (Outbound)
+      # -----------------------------------------------------------------------
+      "856":
+        segments:
+          BSN:
+            elements:
+              BSN01:
+                allowed_codes: ["00", "05"]
+                note: "00=Original, 05=Replace"
+              BSN02:
+                constraints:
+                  uniqueness: "Must be unique for 2 years"
+                  no_zero_fill: true
+              BSN05:
+                allowed_codes: ["0001", "0004"]
+                note: "0001=Detail ASN (GS1-128), 0004=Summary ASN"
+
+          TD1:
+            elements:
+              TD101:
+                allowed_codes: [CTN, PLT, SLP]
+                note: "CTN=Carton, PLT=Pallet, SLP=Slip Sheet"
+
+          TD5:
+            elements:
+              TD502:
+                allowed_codes: ["2", "91"]
+                note: "2=SCAC, 91=Assigned by Seller"
+              TD504:
+                allowed_codes: [M, R, U, LT]
+                note: "M=Motor, R=Rail, U=Private Parcel, LT=LTL"
+
+          TD3:
+            elements:
+              TD301:
+                allowed_codes: [2B, 4B, BX, CV, FT, RF, RT]
+                note: "Equipment description codes"
+
+          PRF:
+            elements:
+              PRF01:
+                constraints:
+                  max_digits: 9
+              PRF07:
+                allowed_codes: [CN]
+                note: "Only for FDC consignment ASNs"
+
+          PKG:
+            elements:
+              PKG06:
+                allowed_codes: ["01", "02"]
+                note: "01=Palletized, 02=Floor Stack"
+
+          REF_order:
+            elements:
+              REF01:
+                allowed_codes: [BM, CN, IA, MB]
+            instances:
+              - qualifier: IA
+                description: "Internal Vendor Number"
+                required: true
+              - qualifier: BM
+                description: "Bill of Lading Number"
+                required: false
+
+          DTM_shipment:
+            elements:
+              DTM01:
+                allowed_codes: ["011"]
+                note: "011=Shipped"
+
+          DTM_order:
+            elements:
+              DTM01:
+                allowed_codes: ["067"]
+                note: "067=Current Schedule Delivery"
+
+          FOB_shipment:
+            elements:
+              FOB01:
+                allowed_codes: [CC, CF, PC, PP]
+
+          N1_order_loop:
+            overrides:
+              N103:
+                qualifier: "94"
+                note: "856 uses qualifier 94 at order level"
+            instances:
+              - qualifier_N101: ST
+                description: "Ship To"
+                required: true
+              - qualifier_N101: MA
+                description: "Ultimate destination (cross-dock)"
+                required: false
+
+          LIN:
+            elements:
+              LIN02:
+                allowed_codes: [CB, EN, UK, UP]
+                note: "CB=Lowe's SKU (preferred), UP=UPC"
+
+          MAN:
+            elements:
+              MAN01:
+                qualifier: "GM"
+                note: "SSCC-18 and Application Identifier"
+            condition: "Detail ASNs only (BSN05=0001)"
+
+        business_rules:
+          - id: one_po_per_asn
+            name: "One PO Per ASN"
+            description: "Each ASN can contain only one purchase order"
+          - id: replacement_reuse_bsn02
+            name: "Replacement ASN BSN02"
+            description: "Replacement ASNs (BSN01=05) must reuse the original BSN02"
+
+        mapping_refs:
+          - "mappings/850_to_856_turnaround.yaml"
+
+      # -----------------------------------------------------------------------
+      # 860 — PO Change Request (Inbound)
+      # -----------------------------------------------------------------------
+      "860":
+        segments:
+          BCH:
+            elements:
+              BCH01:
+                allowed_codes: ["01", "05"]
+                note: "01=Cancellation, 05=Replace"
+              BCH02:
+                qualifier: "CP"
+                note: "Always CP (Change to Purchase Order)"
+              BCH03:
+                constraints:
+                  max_digits: 9
+                  format: "zero-suppressed"
+
+          CUR:
+            elements:
+              CUR01:
+                qualifier: "SE"
+              CUR02:
+                codelist_ref: currency_code
+
+          REF:
+            elements:
+              REF01:
+                allowed_codes: [DP, IA, WO]
+
+          FOB:
+            elements:
+              FOB01:
+                allowed_codes: [CC, PP]
+                note: "860 only supports Collect and Prepaid"
+
+          DTM:
+            elements:
+              DTM01:
+                allowed_codes: ["002", "010"]
+
+          N1_loop:
+            overrides:
+              N103:
+                qualifier: "93"
+                note: "860 uses qualifier 93 (same as 850)"
+            instances:
+              - qualifier_N101: ST
+                description: "Ship To"
+                required: false
+              - qualifier_N101: MA
+                description: "Ultimate store (cross-dock)"
+                required: false
+
+          POC:
+            elements:
+              POC02:
+                allowed_codes: [NC, RZ]
+                note: "NC=No Change, RZ=Replace All Values"
+              POC08:
+                allowed_codes: [CB]
+
+        business_rules:
+          - id: full_replacement
+            name: "Full Replacement Rule"
+            description: "BCH01=05 requires ALL items — changed (RZ) and unchanged (NC)"
+
+        mapping_refs:
+          - "mappings/860_to_865_turnaround.yaml"
+
+      # -----------------------------------------------------------------------
+      # 865 — PO Change Acknowledgment (Outbound)
+      # -----------------------------------------------------------------------
+      "865":
+        segments:
+          BCA:
+            elements:
+              BCA01:
+                qualifier: "00"
+                note: "Always Original"
+              BCA02:
+                allowed_codes: [AT, RJ]
+                note: "AT=Accepted, RJ=Rejected"
+              BCA03:
+                constraints:
+                  max_digits: 9
+                  format: "zero-suppressed"
+              BCA05:
+                format: "CCYYMMDD"
+
+        business_rules:
+          - id: header_only
+            name: "Header-Only Response"
+            description: "865 has no detail segments — one header per 860"
+          - id: date_constraint
+            name: "Date Constraint"
+            description: "BCA05 date must be on or after BCH05 (860 date)"
+
+        mapping_refs:
+          - "mappings/860_to_865_turnaround.yaml"
+
+      # -----------------------------------------------------------------------
+      # 810 — Invoice (Outbound)
+      # -----------------------------------------------------------------------
+      "810":
+        segments:
+          BIG:
+            elements:
+              BIG01:
+                format: "CCYYMMDD"
+              BIG02:
+                constraints:
+                  max_digits: 10
+                  note: "Lowe's Payables truncates beyond 10 digits"
+              BIG04:
+                constraints:
+                  max_digits: 9
+              BIG07:
+                default: "DR"
+                allowed_codes: [CR, DR, ME]
+                note: "CR=Credit Memo, DR=Debit Memo, ME=Memorandum"
+
+          NTE:
+            elements:
+              NTE01:
+                qualifier: "GEN"
+
+          CUR:
+            elements:
+              CUR01:
+                qualifier: "SE"
+              CUR02:
+                codelist_ref: currency_code
+            turnaround_source: { transaction: "850", segment: "CUR" }
+
+          N1_loop:
+            overrides:
+              N103:
+                allowed_codes: ["92", "94"]
+                note: "810 uses 92 (for ST/MA) and 94 (for RI)"
+            instances:
+              - qualifier_N101: ST
+                description: "Ship To"
+                required: true
+                qualifier_N103: "92"
+              - qualifier_N101: MA
+                description: "Ultimate destination"
+                required: false
+                qualifier_N103: "92"
+              - qualifier_N101: RI
+                description: "Remit To"
+                required: false
+                qualifier_N103: "94"
+
+          ITD:
+            elements:
+              ITD01:
+                allowed_codes: ["05", "08"]
+                note: "05=No Discount, 08=With Discount"
+              ITD02:
+                qualifier: "3"
+                note: "Invoice Date"
+
+          DTM:
+            elements:
+              DTM01:
+                allowed_codes: ["011", "008"]
+                note: "011=Shipped, 008=PO Received"
+
+          FOB:
+            turnaround_source: { transaction: "850", segment: "FOB", element: "FOB01" }
+            freight_rules:
+              PC: "Must include SAC with freight charges (D240)"
+              CF: "Must include SAC with freight allowance"
+
+          IT1:
+            elements:
+              IT106:
+                qualifier: "CB"
+                note: "Buyer's Catalog Number (Lowe's SKU)"
+            turnaround:
+              source: { transaction: "850", segment: "PO1" }
+              required_fields: [IT101, IT102, IT103, IT104, IT106, IT107]
+
+          PID:
+            elements:
+              PID01:
+                allowed_codes: [F, X]
+                note: "F=Free-form, X=Formaldehyde compliance"
+
+          TDS:
+            elements:
+              TDS01:
+                computed: "sum(IT1 qty * unit_price) + sum(SAC charges) - sum(SAC allowances)"
+
+          CAD:
+            elements:
+              CAD04:
+                turnaround_source: { transaction: "850", segment: "TD5", element: "TD503" }
+
+          SAC:
+            elements:
+              SAC01:
+                allowed_codes: [A, C]
+                note: "A=Allowance, C=Charge"
+
+        business_rules:
+          - id: cross_dock_n1_ordering
+            name: "Cross-Dock N1 Ordering"
+            description: "MA must be second in sequence after ST to avoid wrong store pickup"
+          - id: invoice_to_ma
+            name: "Invoice to MA"
+            description: "Always invoice to MA (ultimate store), not ST (RDC)"
+          - id: dtm_qualifier_change
+            name: "DTM Qualifier Change"
+            description: "DTM qualifiers change between 850 and 810 — do NOT echo directly"
+
+        mapping_refs:
+          - "mappings/850_to_810_turnaround.yaml"
+          - "mappings/855_to_810_turnaround.yaml"
+          - "mappings/856_to_810_turnaround.yaml"
+
+  # ===========================================================================
+  # MINIMAL — Required segments only, no business rules
+  # ===========================================================================
+  minimal:
+    name: "Minimal"
+    description: >
+      Required segments only with no business rules. Suitable as a starting
+      point for partners with simple EDI requirements. All optional segments
+      and qualifier restrictions are omitted.
+    recommended: false
+
+    transactions:
+
+      "850":
+        segments:
+          BEG:
+            elements:
+              BEG01:
+                note: "Transaction Set Purpose Code"
+              BEG03:
+                note: "Purchase Order Number"
+              BEG05:
+                format: "CCYYMMDD"
+          N1_loop:
+            instances:
+              - qualifier_N101: ST
+                description: "Ship To"
+                required: true
+          PO1:
+            elements:
+              PO102:
+                note: "Quantity ordered"
+              PO103:
+                note: "Unit of measure"
+          CTT:
+            elements:
+              CTT01:
+                computed: "Count of PO1 line items"
+        business_rules: []
+        mapping_refs: []
+
+      "855":
+        segments:
+          BAK:
+            elements:
+              BAK01:
+                note: "Transaction Set Purpose Code"
+              BAK03:
+                note: "Purchase Order Number"
+        business_rules: []
+        mapping_refs: []
+
+      "856":
+        segments:
+          BSN:
+            elements:
+              BSN01:
+                note: "Transaction Set Purpose Code"
+              BSN02:
+                note: "Shipment Identification"
+          PRF:
+            elements:
+              PRF01:
+                note: "Purchase Order Number"
+          LIN:
+            elements:
+              LIN02:
+                note: "Product/Service ID Qualifier"
+              LIN03:
+                note: "Product/Service ID"
+          SN1:
+            elements:
+              SN102:
+                note: "Number of Units Shipped"
+              SN103:
+                note: "Unit of Measure"
+        business_rules: []
+        mapping_refs: []
+
+      "860":
+        segments:
+          BCH:
+            elements:
+              BCH01:
+                note: "Transaction Set Purpose Code"
+              BCH03:
+                note: "Purchase Order Number"
+        business_rules: []
+        mapping_refs: []
+
+      "865":
+        segments:
+          BCA:
+            elements:
+              BCA02:
+                note: "Acknowledgment Type"
+              BCA03:
+                note: "Purchase Order Number"
+        business_rules: []
+        mapping_refs: []
+
+      "810":
+        segments:
+          BIG:
+            elements:
+              BIG01:
+                format: "CCYYMMDD"
+              BIG04:
+                note: "Purchase Order Number"
+          IT1:
+            elements:
+              IT102:
+                note: "Quantity Invoiced"
+              IT103:
+                note: "Unit of Measure"
+              IT104:
+                note: "Unit Price"
+          TDS:
+            elements:
+              TDS01:
+                note: "Total invoice amount"
+        business_rules: []
+        mapping_refs: []
+
+  # ===========================================================================
+  # BLANK — Empty configuration for manual setup
+  # ===========================================================================
+  blank:
+    name: "Blank"
+    description: >
+      Empty configuration — user builds everything from scratch.
+      No pre-filled qualifiers, no business rules, no mapping defaults.
+      Intended for advanced users who need full control.
+    recommended: false
+
+    transactions:
+      "850":
+        segments: {}
+        business_rules: []
+        mapping_refs: []
+      "855":
+        segments: {}
+        business_rules: []
+        mapping_refs: []
+      "856":
+        segments: {}
+        business_rules: []
+        mapping_refs: []
+      "860":
+        segments: {}
+        business_rules: []
+        mapping_refs: []
+      "865":
+        segments: {}
+        business_rules: []
+        mapping_refs: []
+      "810":
+        segments: {}
+        business_rules: []
+        mapping_refs: []
