@@ -1,6 +1,6 @@
 # certPortal
 
-Cloud-native, multi-tenant EDI certification platform. Sprints 1–6 complete. playwrightcli Steps #1–8, #10 complete (112 checks, 0 failures).
+Cloud-native, multi-tenant EDI certification platform. Sprints 1–6 + Portal Refactoring complete. 189 Playwright E2E checks, 0 failures.
 
 ## Architecture
 
@@ -19,9 +19,9 @@ Cloud-native, multi-tenant EDI certification platform. Sprints 1–6 complete. p
 
 | Portal | Audience | Port | Theme |
 |---|---|---|---|
-| Pam | certPortal Admins | 8000 | Dark command center |
-| Meredith | Retailer EDI Managers | 8001 | Clean enterprise SaaS |
-| Chrissy | Supplier EDI Coordinators | 8002 | Warm, task-focused |
+| Pam | certPortal Admins | 8000 | Pink accent, defaults dark |
+| Meredith | Retailer EDI Managers | 8001 | Blue accent |
+| Chrissy | Supplier EDI Coordinators | 8002 | Amber accent, warm task-focused |
 
 **Core modules:**
 
@@ -54,6 +54,11 @@ psql $CERTPORTAL_DB_URL -f migrations/002_users_table.sql
 psql $CERTPORTAL_DB_URL -f migrations/003_patch_reject.sql
 psql $CERTPORTAL_DB_URL -f migrations/004_revoked_tokens.sql
 psql $CERTPORTAL_DB_URL -f migrations/005_password_reset.sql
+psql $CERTPORTAL_DB_URL -f migrations/007_wizard_sessions.sql
+psql $CERTPORTAL_DB_URL -f migrations/008_retailer_specs_v2.sql
+psql $CERTPORTAL_DB_URL -f migrations/009_exception_requests.sql
+psql $CERTPORTAL_DB_URL -f migrations/010_template_library.sql
+psql $CERTPORTAL_DB_URL -f migrations/011_expanded_gates.sql
 
 # 5. Run portals (each in its own terminal or via Procfile)
 uvicorn portals.pam:app --port 8000
@@ -121,15 +126,24 @@ python -m playwrightcli --portal pam --verify --headless
 python -m playwrightcli --portal all --verify --dry-run
 ```
 
-**Current coverage (Steps #1–8, #10):** 112 checks across 35 steps, 0 failures, 0 skips.
+**Current coverage (Steps #1–8, #10 + Portal Refactoring):** 189 checks across 14 flows, 0 failures.
 
-| Portal | Steps | Checks | Requirement groups |
-|--------|-------|--------|--------------------|
-| PAM | 10 | 40 | Auth, Dashboard, Retailers, Suppliers, HITL, Gate enforcement (INV-03), Password reset, JWT revocation, Memory |
-| Meredith | 7 | 24 | Auth, Spec setup, Supplier status (scoped), YAML Wizard Path 2/1/3 signals |
-| Chrissy | 7 | 30 | Auth, Dashboard, Scenarios, Errors, Patches, Patch-apply signal, Certification |
-| Scope | 8 | 14 | Supplier A/B isolation (INV-06), Retailer A/B isolation (INV-06), Certification full flow |
-| RBAC | 3 | 3 | Cross-portal role enforcement (supplier→PAM, retailer→Chrissy, supplier→Meredith) |
+| Flow | Steps | Checks | Focus |
+|------|-------|--------|-------|
+| PAM | 10 | 40 | Auth, Dashboard, Retailers, Suppliers, HITL, Gate enforcement, Password reset, JWT revocation, Memory |
+| Meredith | 7 | 24 | Auth, Spec setup, Supplier status, YAML Wizard signals |
+| Chrissy | 7 | 30 | Auth, Dashboard, Scenarios, Errors, Patches, Signals, Certification |
+| Scope | 8 | 14 | Multi-tenant isolation (INV-06), Certification full flow |
+| RBAC | 3 | 3 | Cross-portal role enforcement |
+| Lifecycle-Wizard | 10 | 8 | Lifecycle wizard E2E |
+| Layer2-Wizard | 10 | 9 | Layer 2 YAML wizard E2E |
+| Wizard-Session | 5 | 4 | Multi-session persistence |
+| Health | 4 | 33 | HTMX, SRI, buttons, console, assets |
+| Onboarding | 20 | 20 | 6-step supplier onboarding wizard |
+| Exception | 12 | 12 | Exception request → approve/deny → Kelly signal |
+| Template | 10 | 10 | PAM create/publish → Meredith adopt/fork |
+| Gate-Model | 8 | 8 | Gate A/B/1/2/3 enforcement, binary states |
+| Visual | 5 | 5 | Design system, dark mode, responsive |
 
 See `TODO.md` for Step #9 (Monica escalation, deferred) and remaining project to-dos.
 

@@ -1,10 +1,11 @@
-# certPortal — Architectural Decision Record (Sprint 1–6 + playwrightcli Steps #1–8, #10 + Wizard Refactoring)
+# certPortal — Architectural Decision Record (Sprint 1–6 + playwrightcli + Wizard Refactoring + Portal Refactoring)
 
-Decisions made during Sprints 1–6, the playwrightcli hardening work, and the Wizard
-Refactoring (Phases A–P) that were not explicitly covered by the build prompt.
-All choices favour the most conservative, explicit, auditable option.
+Decisions made during Sprints 1–6, the playwrightcli hardening work, the Wizard
+Refactoring (Phases A–P), and the Portal Refactoring (2026-03-15) that were not explicitly
+covered by the build prompt. All choices favour the most conservative, explicit, auditable option.
 ADR-001 through ADR-031: Sprints 1–6 + playwrightcli.
 ADR-032 through ADR-036: Wizard Refactoring (two-wizard architecture, X12 sourcing, partner registry, artifacts, sessions).
+ADR-037 through ADR-042: Portal Refactoring (onboarding wizard, exception system, template library, unified CSS, dark mode, E2E fix).
 
 ---
 
@@ -1015,3 +1016,51 @@ S3 verification follows the same three-check pattern (HTTP 200 / signal exists /
 **Context:** Wizard configuration involves multiple steps across potentially multiple sessions. Retailers may want to experiment with different configurations simultaneously.
 **Decision:** wizard_sessions table with JSONB state_json column. Multiple active (incomplete) sessions per retailer allowed. Strict/deterministic validation only at finalization (generate step). Sessions persist until explicitly completed or deleted.
 **Why:** Flexibility during configuration, strictness at commit time. DB persistence survives browser close and server restart.
+
+---
+
+## ADR-037: Gate A/B expansion — five-gate prerequisite chain
+
+**Context:** The 6-step onboarding wizard requires finer-grained gate progression than the original 3-gate model. Suppliers must acknowledge specs (Gate A) and provide contact info (Gate B) before reaching the original Gate 1 (connection setup).
+**Decision:** Expanded `gate_enforcer.py` to support string gate identifiers ("a", "b") alongside integers (1, 2, 3). Prerequisite chain: A → B → 1 → 2 → 3. Added `gate_a` and `gate_b` TEXT columns to `hitl_gate_status` (migration 011). Added `compute_current_step()` to derive the wizard step from gate state + onboarding profile.
+**Alternative considered:** Separate gate table for onboarding. Rejected — would violate INV-03 (single authority).
+
+---
+
+## ADR-038: Exception request system — four reason codes
+
+**Context:** Suppliers need to request exemptions from test scenarios that don't apply to their business. Retailers review and approve/deny these requests.
+**Decision:** New `exception_requests` table (migration 009) with CHECK constraint on `reason_code` IN ('NOT_APPLICABLE', 'HANDLED_EXTERNALLY', 'DEFERRED', 'RETAILER_WAIVED'). Status lifecycle: PENDING → APPROVED | DENIED. S3 signals `exception_requested` and `exception_resolved` trigger Kelly notifications (INV-07 compliant — no agent imports).
+**Why four codes:** Covers the real-world exemption categories from EDI trading partner programs. Adding more requires a migration.
+
+---
+
+## ADR-039: PAM template library — three category types
+
+**Context:** PAM admins need to create reusable EDI configuration templates that retailers can adopt or customize.
+**Decision:** New `pam_templates` table (migration 010) with CHECK constraint on `category` IN ('lifecycle', 'scenario_bundle', 'layer2_preset'). Retailers adopt (link to original) or fork (clone content for independent editing) via `retailer_template_adoption` table. Templates are versioned and publish/unpublish controlled.
+**Why adopt vs fork:** Adopt maintains upstream link for future template updates; fork gives retailer full independence. Both patterns exist in real SaaS template systems.
+
+---
+
+## ADR-040: Unified CSS design system — certportal-core.css
+
+**Context:** Three separate CSS files (~800 lines total) with duplicated components, inconsistent styling, and no shared design tokens. Maintenance burden: fixing a nav bug required changes in 3 files.
+**Decision:** Single `certportal-core.css` (648 lines) with CSS custom properties for all design tokens. Three portal accent files (~7 lines each) override only `--color-primary` and related properties. Base theme: Chrissy's warm light (Plus Jakarta Sans, 12px radius, 60px nav). Old CSS files deleted.
+**Why Chrissy as base:** Warmest, most approachable theme. Enterprise users (Meredith, PAM) adapt via accent color alone.
+
+---
+
+## ADR-041: Dark mode toggle — localStorage persistence
+
+**Context:** PAM was hard-coded dark with no light option. Other portals had no dark mode.
+**Decision:** `theme.js` (29 lines) checks localStorage → OS preference → portal default (PAM=dark, others=light). Toggle button in nav (`#theme-toggle`) persists choice in `certportal-theme` localStorage key. Dark mode tokens override all CSS custom properties via `[data-theme="dark"]` selector.
+**Alternative considered:** Server-side theme preference in user profile. Rejected — adds DB complexity for a pure UI concern.
+
+---
+
+## ADR-042: Playwright nav logout button fix
+
+**Context:** All new E2E flows that submitted forms on authenticated pages were silently logging out instead. Root cause: `base.html` nav has `<button type="submit" class="btn-logout">` inside a `<form action="/logout">`. This was the FIRST `button[type="submit"]` matched by Playwright's `page.click('button[type="submit"]')`.
+**Decision:** All flow files use text-specific selectors (`button:has-text("Acknowledge")`, `.step-form button[type="submit"]`, `button:has-text("Save Items")`) instead of generic `button[type="submit"]` on authenticated pages. Login pages (which have only one submit button) remain unchanged.
+**Impact:** Fixed 55 new E2E steps that were previously cascade-failing. Documented in `playwrightRalph.md`.

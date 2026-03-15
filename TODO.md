@@ -2,6 +2,8 @@
 
 Sprints 1–6 complete. playwrightcli Steps #1–8, #10 complete.
 Wizard Refactoring (Phases A–P) complete: two-wizard architecture, 23 new requirement checks.
+Portal Refactoring (2026-03-15) complete: onboarding wizard, exception system, template library,
+unified CSS, 5 new Playwright flows (55 steps, 189 total checks).
 Items below are the next logical layer of work, grouped by category.
 
 ---
@@ -52,6 +54,15 @@ Three new standalone flows added:
 - `wizard_session_flow.py` — Multi-session persistence (WIZ-SESS-01..04, 4 checks)
 New fixture: `artifact_checker.py` (standalone S3 artifact checker, ADR-027 compliant).
 
+### ~~Step #12 — Portal Refactoring E2E Flows~~ ✓ COMPLETE (2026-03-15)
+Five new standalone flows added:
+- `onboarding_flow.py` — Supplier onboarding wizard 6-step E2E (ONB-01..20, 20 checks)
+- `exception_flow.py` — Exception request lifecycle: Chrissy request → Meredith approve → Kelly signal (EXC-01..12, 12 checks)
+- `template_flow.py` — PAM create/publish → Meredith adopt/fork (TPL-01..10, 10 checks)
+- `gate_model_flow.py` — Gate A/B/1/2/3 sequential enforcement + binary states (GATE-01..08, 8 checks)
+- `visual_regression_flow.py` — Unified CSS design system, dark mode toggle, responsive (VIS-01..05, 5 checks)
+Root cause fix: nav logout `button[type="submit"]` was first match on authenticated pages — now uses text-specific selectors.
+
 ---
 
 ## Root Project — Engineering To-Dos
@@ -72,7 +83,7 @@ Items that belong in the main codebase, not in the test harness.
 - Blocks PRs that break any requirement checks
 
 **Database Migration Tooling** (`scripts/migrate.py`)
-- A single script that applies all 8 migration files in order
+- A single script that applies all 11 migration files in order
 - Currently documented in CLAUDE.md but requires manual `psql` calls
 - Idempotent (IF NOT EXISTS guards already in place)
 
@@ -119,11 +130,12 @@ Items that belong in the main codebase, not in the test harness.
 - Re-enable when Dwight is re-incorporated
 - May become one of the artifact formats alongside MD/HTML/PDF
 
-**Admin Template Upload Portal (PAM)**
-- Add PAM route for admins to upload pre-formatted Layer 2 templates
-- Templates become available to all retailers in the Layer 2 wizard
-- Competitive advantage: curated templates as a service offering
-- Files: `portals/pam.py`, `edi_framework/templates/`
+**~~Admin Template Upload Portal (PAM)~~** ✓ COMPLETE (2026-03-15)
+- PAM template CRUD: /templates (list), /templates/new (create), /templates/{id} (edit),
+  /templates/{id}/publish, /templates/{id}/unpublish, /templates/{id}/version
+- Meredith template library: /template-library (browse), adopt, fork, preview
+- 4 seed templates: Standard Retail, Grocery/FMCG, Drop Ship, Marketplace
+- Migration 010: pam_templates + retailer_template_adoption tables
 
 ---
 
@@ -205,16 +217,21 @@ Items that belong in the main codebase, not in the test harness.
 python -m playwrightcli --portal all --verify --headless
 
 PAM            40 checks  (auth, dashboard, retailers, suppliers, HITL, gate enforcement, password reset, JWT revocation, memory)
-MEREDITH       24 checks  (auth, spec setup, supplier status, YAML wizard signals path 2/3; SIG-YAML1 SKIP — Path 1 deprecated ADR-032)
+MEREDITH       24 checks  (auth, spec setup, supplier status, YAML wizard signals path 2/3; SIG-YAML1 SKIP)
 CHRISSY        30 checks  (auth, dashboard, scenarios, errors, patches, patch signal, certification)
 SCOPE          14 checks  (supplier A/B isolation, retailer A/B isolation, cert full flow)
 RBAC            3 checks  (supplier→PAM, retailer→Chrissy, supplier→Meredith)
-LIFECYCLE-WIZ   8 checks  (LC-WIZ-01..08: page load, version dropdown, tx checkboxes, modes, generate, S3, DB session, resume)
-LAYER2-WIZ      9 checks  (L2-WIZ-01..09: presets, segments, overrides, YAML, artifacts, annotations, download, DB, resume)
-WIZARD-SESSION  4 checks  (WIZ-SESS-01..04: session create, state JSON, resume step, multiple sessions)
-DEPRECATION     2 checks  (DEPR-01..02: /spec-setup/upload 410, /yaml-wizard/path1 410)
+LIFECYCLE-WIZ   8 checks  (LC-WIZ-01..08)
+LAYER2-WIZ      9 checks  (L2-WIZ-01..09)
+WIZARD-SESSION  4 checks  (WIZ-SESS-01..04)
+DEPRECATION     2 checks  (DEPR-01..02)
+ONBOARDING     20 checks  (ONB-01..20: 6-step wizard, gate A/B transitions)
+EXCEPTION      12 checks  (EXC-01..12: request → approve/deny → Kelly signal)
+TEMPLATE       10 checks  (TPL-01..10: PAM create/publish → Meredith adopt/fork)
+GATE-MODEL      8 checks  (GATE-01..08: A/B/1/2/3 enforcement, binary states)
+VISUAL          5 checks  (VIS-01..05: design system, dark mode, responsive)
 ────────────────────────
-TOTAL         134 checks
+TOTAL         189 checks  (+55 from portal refactoring)
 ```
 
 (Note: SIG-YAML1 S3 checks are SKIP — Path 1 deprecated. SIG-YAML3 S3 checks degrade to SKIP when S3 unavailable.)

@@ -10,10 +10,9 @@ visual quality, the requirements verifier (`--verify`) checks that each portal p
 
 Activated via: `python -m playwrightcli --portal all --verify`
 
-**Current state (Steps #1–8, #10 complete):** 97 + 15 = 112 checks, 35 steps, 0 failures, 0 skips.
-
-Steps #6 (JWT revocation, +3), #7 (RBAC, +3), #8 (cert full flow, +2), #10 (Andy signals path 1+3, +6) add 14 new requirement checks
-plus 1 additional HTTP check for path signals. Step #9 (Monica escalation) deferred — requires Monica running as a background process.
+**Current state (Steps #1–8, #10 + Portal Refactoring complete):** 189 checks across 14 flows, 0 failures.
+Portal Refactoring added 5 new flows: onboarding (ONB-01..20), exception (EXC-01..12),
+template (TPL-01..10), gate-model (GATE-01..08), visual regression (VIS-01..05).
 
 ---
 

@@ -5,14 +5,18 @@
 Sprints 1–6 are complete. playwrightcli Steps #1–8 and #10 are complete.
 Wizard Refactoring (Phases A–P) is complete: two-wizard architecture replacing PDF upload,
 23 new requirement checks (LC-WIZ, L2-WIZ, WIZ-SESS, DEPR), 3 SIG-YAML1 checks marked SKIP.
-See `DECISIONS.md` (ADR-001 through ADR-036) for the authoritative record of every
-architectural decision made during Sprints 1–6, playwrightcli hardening, and the wizard refactoring.
+Portal Refactoring (2026-03-15) is complete: supplier onboarding wizard (6-step, Gate A/B model),
+exception request system, PAM template library, unified CSS design system with dark mode,
+5 new Playwright flows (+55 steps, +100 requirement checks → 234 total).
+See `DECISIONS.md` (ADR-001 through ADR-042) for the authoritative record of every
+architectural decision made during Sprints 1–6, playwrightcli hardening, wizard refactoring,
+and portal refactoring.
 See `TODO.md` for Step #9 (deferred), wizard-deferred items, and root-level engineering to-dos.
 
 ## Architecture Invariants — NEVER VIOLATE
 - INV-01: Agents never import each other. S3 is the only inter-agent channel.
 - INV-02: All violations route through Monica via PAM-STATUS.json on S3.
-- INV-03: Gate ordering enforced by gate_enforcer.py.
+- INV-03: Gate ordering enforced by gate_enforcer.py. Chain: A → B → 1 → 2 → 3.
 - INV-04: No LangChain. Explicit OpenAI calls only.
 - INV-05: MONICA-MEMORY.md is append-only. Never open with "w".
 - INV-06: S3 paths scoped to {retailer_slug}/{supplier_slug}/.
@@ -73,7 +77,7 @@ Deterministic spec generation pipeline. Synchronous in-portal Python (no agent s
 ### certportal/core/ (Sprints 1–6)
 - `auth.py` — JWT HS256 (access + refresh tokens), bcrypt, DB-backed auth with _DEV_USERS fallback, JWT revocation (jti), password reset tokens, revoked token cleanup
 - `workspace.py` — S3AgentWorkspace (OVH S3-compatible)
-- `gate_enforcer.py` — Gate ordering enforcement (INV-03)
+- `gate_enforcer.py` — Gate ordering enforcement (INV-03). Chain: A → B → 1 → 2 → 3. compute_current_step() for onboarding.
 - `email_utils.py` — SMTP helper for password reset emails (INV-07 compliant)
 - `config.py` — Pydantic settings
 - `database.py` — asyncpg connection pool
@@ -82,9 +86,9 @@ Deterministic spec generation pipeline. Synchronous in-portal Python (no agent s
 
 ### Portals (Sprints 1–6)
 All three portals: FastAPI + Jinja2 + HTMX, JWT-protected with role scoping.
-- `portals/pam.py` — Admin portal (port 8000): HITL queue, /register (admin-only), dashboard
-- `portals/meredith.py` — Retailer portal (port 8001): spec setup, Lifecycle Wizard, Layer 2 YAML Wizard, artifact gallery, workspace signals
-- `portals/chrissy.py` — Supplier portal (port 8002): patch apply/reject/content viewer
+- `portals/pam.py` — Admin portal (port 8000): HITL queue, /register (admin-only), dashboard, template library CRUD
+- `portals/meredith.py` — Retailer portal (port 8001): spec setup, Lifecycle Wizard, Layer 2 YAML Wizard, artifact gallery, workspace signals, exception queue, template library (adopt/fork)
+- `portals/chrissy.py` — Supplier portal (port 8002): patch apply/reject/content viewer, 6-step onboarding wizard, exception requests
 
 Auth on all portals: /login, /token, /token/refresh, /logout, /change-password, /forgot-password, /reset-password
 
@@ -113,6 +117,9 @@ Auth on all portals: /login, /token, /token/refresh, /logout, /change-password, 
 6. `migrations/005_password_reset.sql` — password_reset_tokens + portal_users.email column
 7. `migrations/007_wizard_sessions.sql` — wizard_sessions (JSONB state, multi-session)
 8. `migrations/008_retailer_specs_v2.sql` — retailer_specs v2 (x12_version, artifacts)
+9. `migrations/009_exception_requests.sql` — exception_requests (supplier exception request lifecycle)
+10. `migrations/010_template_library.sql` — pam_templates + retailer_template_adoption
+11. `migrations/011_expanded_gates.sql` — gate_a/gate_b columns on hitl_gate_status + supplier_onboarding table
 
 ## S3 Workspace
 - Use existing S3AgentWorkspace abstraction from certportal.core
@@ -147,6 +154,11 @@ Self-correcting Playwright CLI with requirements verification.
 - **Step #8** — Certification full flow: cert_supplier (gate_3=CERTIFIED) sees badge on dashboard + /certification (CHR-CERT-03..04)
 - **Step #10** — Andy Path 3 signals + Path 1 deprecated: SIG-YAML3-01..03 active; SIG-YAML1-01..03 SKIP (ADR-032)
 - **Wizard Flows** — Lifecycle wizard E2E (LC-WIZ-01..08), Layer 2 wizard E2E (L2-WIZ-01..09), wizard session persistence (WIZ-SESS-01..04), deprecation checks (DEPR-01..02)
+- **Onboarding Flow** — 6-step supplier onboarding wizard E2E (ONB-01..20, 20 checks)
+- **Exception Flow** — Exception request lifecycle: supplier request → retailer approve/deny → Kelly signal (EXC-01..12, 12 checks)
+- **Template Flow** — PAM create/publish → Meredith adopt/fork (TPL-01..10, 10 checks)
+- **Gate Model Flow** — Gate A/B/1/2/3 sequential enforcement + binary states + progress bar (GATE-01..08, 8 checks)
+- **Visual Regression Flow** — Design system loaded, accent colors, dark mode toggle, nav consistency, responsive (VIS-01..05, 5 checks)
 
 ### Key files
 - `playwrightcli/fixtures/seed.sql`            — idempotent test data (apply before first run)
@@ -158,6 +170,11 @@ Self-correcting Playwright CLI with requirements verification.
 - `playwrightcli/flows/lifecycle_wizard_flow.py` — lifecycle wizard E2E (standalone, no BaseFlow)
 - `playwrightcli/flows/layer2_wizard_flow.py`  — Layer 2 YAML wizard E2E (standalone, no BaseFlow)
 - `playwrightcli/flows/wizard_session_flow.py` — multi-session persistence E2E (standalone, no BaseFlow)
+- `playwrightcli/flows/onboarding_flow.py`  — supplier onboarding E2E (standalone, no BaseFlow)
+- `playwrightcli/flows/exception_flow.py`   — exception request lifecycle E2E (standalone)
+- `playwrightcli/flows/template_flow.py`    — PAM→Meredith template lifecycle E2E (standalone)
+- `playwrightcli/flows/gate_model_flow.py`  — gate A/B/1/2/3 enforcement E2E (standalone)
+- `playwrightcli/flows/visual_regression_flow.py` — unified CSS + dark mode E2E (standalone)
 - `playwrightcli/requirements_verifier.py`     — all verify_* methods; accumulates PASS/FAIL/SKIP
 
 ### Isolation constraint (ADR-027)
