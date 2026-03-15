@@ -139,10 +139,12 @@ ON CONFLICT (supplier_id) DO UPDATE
         gate_3 = 'PENDING',
         last_updated_by = 'seed';
 
-INSERT INTO hitl_gate_status (supplier_id, gate_1, gate_2, gate_3, last_updated_by)
-VALUES ('inv03_ok', 'COMPLETE', 'PENDING', 'PENDING', 'seed')
+INSERT INTO hitl_gate_status (supplier_id, gate_a, gate_b, gate_1, gate_2, gate_3, last_updated_by)
+VALUES ('inv03_ok', 'COMPLETE', 'COMPLETE', 'COMPLETE', 'PENDING', 'PENDING', 'seed')
 ON CONFLICT (supplier_id) DO UPDATE
-    SET gate_1 = 'COMPLETE',
+    SET gate_a = 'COMPLETE',
+        gate_b = 'COMPLETE',
+        gate_1 = 'COMPLETE',
         last_updated_by = 'seed';
 
 -- ---------------------------------------------------------------------------
@@ -154,9 +156,15 @@ ON CONFLICT (supplier_id) DO UPDATE
 -- which Playwright's :has-text("G2") selector will match.
 -- ---------------------------------------------------------------------------
 
-INSERT INTO hitl_gate_status (supplier_id, gate_1, gate_2, gate_3, last_updated_by)
-VALUES ('acme', 'COMPLETE', 'PENDING', 'PENDING', 'seed')
-ON CONFLICT (supplier_id) DO NOTHING;
+INSERT INTO hitl_gate_status (supplier_id, gate_a, gate_b, gate_1, gate_2, gate_3, last_updated_by)
+VALUES ('acme', 'PENDING', 'PENDING', 'COMPLETE', 'PENDING', 'PENDING', 'seed')
+ON CONFLICT (supplier_id) DO UPDATE
+    SET gate_a = 'PENDING',
+        gate_b = 'PENDING',
+        gate_1 = 'COMPLETE',
+        gate_2 = 'PENDING',
+        gate_3 = 'PENDING',
+        last_updated_by = 'seed';
 
 -- ---------------------------------------------------------------------------
 -- hitl_queue
@@ -385,5 +393,70 @@ VALUES (
     'lowes/acme/patches/seed_sig_patch.json',
     FALSE
 );
+
+-- ===========================================================================
+-- PAM TEMPLATES SEED DATA (Phase 1 — template library)
+--
+-- 4 industry templates published by pam_admin. Used by:
+--   TPL-10 (seed templates visible after migration)
+--   TPL-05 (Meredith /template-library shows published templates)
+--   TPL-01..04 (PAM template CRUD flows)
+-- ===========================================================================
+
+INSERT INTO pam_templates (template_slug, name, description, category, industry, x12_version, content_yaml, is_published, created_by)
+VALUES
+    ('standard-retail-otc', 'Standard Retail Order-to-Cash',
+     '850→855→856→810 lifecycle for general retail',
+     'lifecycle', 'retail', '4010',
+     E'---\nname: Standard Retail Order-to-Cash\ntransactions:\n  - 850  # Purchase Order\n  - 855  # PO Acknowledgment\n  - 856  # Ship Notice\n  - 810  # Invoice\nlifecycle:\n  start: PO_RECEIVED\n  terminal: INVOICED\n  transitions:\n    PO_RECEIVED: [PO_ACKNOWLEDGED]\n    PO_ACKNOWLEDGED: [SHIPPED]\n    SHIPPED: [INVOICED]\n',
+     TRUE, 'pam_admin'),
+    ('grocery-fmcg', 'Grocery / FMCG',
+     'Adds 860 change orders with stricter ship-notice timing',
+     'lifecycle', 'grocery', '4010',
+     E'---\nname: Grocery / FMCG\ntransactions:\n  - 850\n  - 855\n  - 860  # Change Order\n  - 856\n  - 810\nlifecycle:\n  start: PO_RECEIVED\n  terminal: INVOICED\n  transitions:\n    PO_RECEIVED: [PO_ACKNOWLEDGED, PO_CHANGED]\n    PO_CHANGED: [PO_ACKNOWLEDGED]\n    PO_ACKNOWLEDGED: [SHIPPED]\n    SHIPPED: [INVOICED]\nconstraints:\n  ship_notice_window_hours: 24\n',
+     TRUE, 'pam_admin'),
+    ('drop-ship', 'Drop Ship',
+     '850→855→856→810 with 3PL routing, no 860/865',
+     'lifecycle', 'retail', '4010',
+     E'---\nname: Drop Ship\ntransactions:\n  - 850\n  - 855\n  - 856\n  - 810\nlifecycle:\n  start: PO_RECEIVED\n  terminal: INVOICED\n  transitions:\n    PO_RECEIVED: [PO_ACKNOWLEDGED]\n    PO_ACKNOWLEDGED: [SHIPPED]\n    SHIPPED: [INVOICED]\nrouting:\n  ship_from: 3PL\n',
+     TRUE, 'pam_admin'),
+    ('marketplace-minimal', 'Marketplace',
+     'Minimal: 850→810 (PO + invoice only)',
+     'lifecycle', 'marketplace', '4010',
+     E'---\nname: Marketplace\ntransactions:\n  - 850\n  - 810\nlifecycle:\n  start: PO_RECEIVED\n  terminal: INVOICED\n  transitions:\n    PO_RECEIVED: [INVOICED]\n',
+     TRUE, 'pam_admin')
+ON CONFLICT (template_slug) DO NOTHING;
+
+-- ===========================================================================
+-- SUPPLIER ONBOARDING SEED DATA (Phase 1 — onboarding wizard)
+--
+-- acme supplier onboarding profile for the lowes tenant. Starts with
+-- specs_acknowledged=FALSE so the onboarding wizard begins at Step 1.
+-- Used by ONB-* and GATE-* requirement checks.
+-- ===========================================================================
+
+INSERT INTO supplier_onboarding (supplier_slug, retailer_slug)
+VALUES ('acme', 'lowes')
+ON CONFLICT (supplier_slug) DO NOTHING;
+
+-- ===========================================================================
+-- EXCEPTION REQUEST SEED DATA (Phase 1 — exception system)
+--
+-- 1 PENDING and 1 APPROVED exception for acme/lowes. Used by:
+--   EXC-01..03 (Chrissy exception request UI)
+--   EXC-04 (appears in Meredith /exception-queue)
+--   EXC-06 (approved exception → EXEMPT)
+--   EXC-12 (exception history visible on scenario detail)
+-- ===========================================================================
+
+INSERT INTO exception_requests (supplier_slug, retailer_slug, scenario_id, transaction_type, reason_code, note, status)
+VALUES
+    ('acme', 'lowes', 'seed-scenario-860', '860', 'NOT_APPLICABLE',
+     'We do not process change orders — all changes are handled via phone.',
+     'PENDING'),
+    ('acme', 'lowes', 'seed-scenario-865', '865', 'HANDLED_EXTERNALLY',
+     'Acknowledgments handled by our 3PL provider directly.',
+     'APPROVED')
+ON CONFLICT (supplier_slug, retailer_slug, scenario_id, transaction_type, status) DO NOTHING;
 
 COMMIT;

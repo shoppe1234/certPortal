@@ -817,5 +817,187 @@ async def change_password(
     )
 
 
+# ---------------------------------------------------------------------------
+# Protected: Template Library Management (admin-only)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/templates", response_class=HTMLResponse)
+async def template_list(
+    request: Request,
+    conn=Depends(get_connection),
+    user: dict = Depends(get_current_user),
+):
+    """List all templates (published + drafts)."""
+    rows = await conn.fetch(
+        "SELECT * FROM pam_templates ORDER BY updated_at DESC",
+    )
+    return templates.TemplateResponse(
+        "pam_templates.html",
+        {
+            "request": request,
+            "portal_name": "pam",
+            "current_user": user,
+            "pam_templates": [dict(r) for r in rows],
+        },
+    )
+
+
+@router.get("/templates/new", response_class=HTMLResponse)
+async def template_new(
+    request: Request,
+    user: dict = Depends(get_current_user),
+):
+    """Template creation form."""
+    return templates.TemplateResponse(
+        "pam_template_editor.html",
+        {
+            "request": request,
+            "portal_name": "pam",
+            "current_user": user,
+            "tpl": None,
+            "mode": "create",
+        },
+    )
+
+
+@router.post("/templates")
+async def template_create(
+    request: Request,
+    template_slug: str = Form(...),
+    name: str = Form(...),
+    description: str = Form(""),
+    category: str = Form(...),
+    industry: str = Form(""),
+    x12_version: str = Form("4010"),
+    content_yaml: str = Form(...),
+    conn=Depends(get_connection),
+    user: dict = Depends(get_current_user),
+):
+    """Create new template."""
+    await conn.execute(
+        """INSERT INTO pam_templates
+           (template_slug, name, description, category, industry, x12_version, content_yaml, created_by)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)""",
+        template_slug, name, description or None, category,
+        industry or None, x12_version, content_yaml, user["sub"],
+    )
+    return RedirectResponse(url="/templates", status_code=302)
+
+
+@router.get("/templates/{template_id}", response_class=HTMLResponse)
+async def template_detail(
+    request: Request,
+    template_id: int,
+    conn=Depends(get_connection),
+    user: dict = Depends(get_current_user),
+):
+    """View/edit template."""
+    row = await conn.fetchrow("SELECT * FROM pam_templates WHERE id = $1", template_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Template not found")
+    return templates.TemplateResponse(
+        "pam_template_editor.html",
+        {
+            "request": request,
+            "portal_name": "pam",
+            "current_user": user,
+            "tpl": dict(row),
+            "mode": "edit",
+        },
+    )
+
+
+@router.post("/templates/{template_id}/update")
+async def template_update(
+    request: Request,
+    template_id: int,
+    conn=Depends(get_connection),
+    user: dict = Depends(get_current_user),
+):
+    """Update template content."""
+    form = await request.form()
+    name = form.get("name", "")
+    description = form.get("description", "")
+    category = form.get("category", "lifecycle")
+    industry = form.get("industry", "")
+    x12_version = form.get("x12_version", "4010")
+    content_yaml = form.get("content_yaml", "")
+
+    await conn.execute(
+        """UPDATE pam_templates
+           SET name=$2, description=$3, category=$4, industry=$5,
+               x12_version=$6, content_yaml=$7, updated_at=NOW()
+           WHERE id=$1""",
+        template_id, name, description or None, category,
+        industry or None, x12_version, content_yaml,
+    )
+    return RedirectResponse(url=f"/templates/{template_id}", status_code=302)
+
+
+@router.post("/templates/{template_id}/publish")
+async def template_publish(
+    template_id: int,
+    conn=Depends(get_connection),
+    user: dict = Depends(get_current_user),
+):
+    """Publish template (set is_published=TRUE)."""
+    result = await conn.execute(
+        "UPDATE pam_templates SET is_published=TRUE, updated_at=NOW() WHERE id=$1",
+        template_id,
+    )
+    if result == "UPDATE 0":
+        raise HTTPException(status_code=404, detail="Template not found")
+
+    # Write template_published signal for Kelly (INV-07)
+    import time as _time, json as _json
+    ts = int(_time.time())
+    from certportal.core.workspace import S3AgentWorkspace
+    workspace = S3AgentWorkspace("_system", "templates")
+    workspace.upload(
+        f"signals/template_published_{template_id}_{ts}.json",
+        _json.dumps({
+            "event_type": "template_published",
+            "template_id": template_id,
+            "published_by": user["sub"],
+            "timestamp": ts,
+        }),
+    )
+
+    return RedirectResponse(url="/templates", status_code=302)
+
+
+@router.post("/templates/{template_id}/unpublish")
+async def template_unpublish(
+    template_id: int,
+    conn=Depends(get_connection),
+    user: dict = Depends(get_current_user),
+):
+    """Unpublish template (set is_published=FALSE)."""
+    result = await conn.execute(
+        "UPDATE pam_templates SET is_published=FALSE, updated_at=NOW() WHERE id=$1",
+        template_id,
+    )
+    if result == "UPDATE 0":
+        raise HTTPException(status_code=404, detail="Template not found")
+    return RedirectResponse(url="/templates", status_code=302)
+
+
+@router.post("/templates/{template_id}/version")
+async def template_version(
+    template_id: int,
+    conn=Depends(get_connection),
+    user: dict = Depends(get_current_user),
+):
+    """Increment version number."""
+    result = await conn.execute(
+        "UPDATE pam_templates SET version = version + 1, updated_at=NOW() WHERE id=$1",
+        template_id,
+    )
+    if result == "UPDATE 0":
+        raise HTTPException(status_code=404, detail="Template not found")
+    return RedirectResponse(url=f"/templates/{template_id}", status_code=302)
+
+
 # Mount the protected router
 app.include_router(router)

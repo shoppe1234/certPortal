@@ -1,0 +1,44 @@
+<!-- Single exception request card (used in meredith_exception_queue.html) -->
+<div class="exception-card exception-card--{{ exc.status | lower }}">
+  <div class="exception-card-header">
+    <span class="exception-supplier">{{ exc.supplier_slug }}</span>
+    <span class="exception-tx">{{ exc.transaction_type }}</span>
+    <span class="badge badge-{{ exc.status | lower }}">{{ exc.status }}</span>
+  </div>
+  <div class="exception-card-body">
+    <div class="exception-detail">
+      <span class="label">Scenario:</span>
+      <span>{{ exc.scenario_id }}</span>
+    </div>
+    <div class="exception-detail">
+      <span class="label">Reason:</span>
+      <span>{{ exc.reason_code | replace('_', ' ') | title }}</span>
+    </div>
+    {% if exc.note %}
+    <div class="exception-detail">
+      <span class="label">Note:</span>
+      <span>{{ exc.note }}</span>
+    </div>
+    {% endif %}
+    <div class="exception-detail">
+      <span class="label">Requested:</span>
+      <span>{{ exc.requested_at.strftime('%Y-%m-%d %H:%M') if exc.requested_at else 'Unknown' }}</span>
+    </div>
+    {% if exc.resolved_at %}
+    <div class="exception-detail">
+      <span class="label">Resolved:</span>
+      <span>{{ exc.resolved_at.strftime('%Y-%m-%d %H:%M') }} by {{ exc.resolved_by }}</span>
+    </div>
+    {% endif %}
+  </div>
+  {% if exc.status == 'PENDING' %}
+  <div class="exception-card-actions">
+    <form method="post" action="/exception-queue/{{ exc.id }}/approve" style="display:inline">
+      <button type="submit" class="btn btn-success btn-sm">Approve</button>
+    </form>
+    <form method="post" action="/exception-queue/{{ exc.id }}/deny" style="display:inline">
+      <button type="submit" class="btn btn-danger btn-sm">Deny</button>
+    </form>
+  </div>
+  {% endif %}
+</div>

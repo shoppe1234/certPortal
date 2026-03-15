@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}certPortal — Supplier Onboarding{% endblock %}
+
+
+{% block nav_links %}
+<li><a href="/" class="nav-link">Home</a></li>
+<li><a href="/onboarding" class="nav-link active">Onboarding</a></li>
+<li><a href="/scenarios" class="nav-link">Scenarios</a></li>
+<li><a href="/errors" class="nav-link">Errors</a></li>
+<li><a href="/patches" class="nav-link">Patches</a></li>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1 class="page-title">Supplier Onboarding</h1>
+  <p class="page-subtitle">Complete each step to certify your EDI connection with {{ retailer_slug | title }}.</p>
+</div>
+
+<!-- Progress indicator -->
+<div class="wizard-progress">
+  {% set steps = [
+    {"num": 1, "label": "Specs", "gate": "gate_a"},
+    {"num": 2, "label": "Contact", "gate": "gate_b"},
+    {"num": 3, "label": "Connection", "gate": "gate_1"},
+    {"num": 4, "label": "Items", "gate": None},
+    {"num": 5, "label": "Testing", "gate": "gate_2"},
+    {"num": 6, "label": "Go-Live", "gate": "gate_3"}
+  ] %}
+  {% for step in steps %}
+  <div class="wizard-step-indicator {% if step.num < current_step %}wizard-step--done{% elif step.num == current_step %}wizard-step--active{% else %}wizard-step--locked{% endif %}">
+    <span class="wizard-step-num">{{ step.num }}</span>
+    <span class="wizard-step-label">{{ step.label }}</span>
+  </div>
+  {% if not loop.last %}
+  <span class="wizard-step-connector {% if step.num < current_step %}wizard-connector--done{% endif %}"></span>
+  {% endif %}
+  {% endfor %}
+</div>
+
+<!-- Step content area -->
+<div class="wizard-content" id="wizard-content">
+  {% if current_step == 1 %}
+    {% include "_onboarding_step1.html" %}
+  {% elif current_step == 2 %}
+    {% include "_onboarding_step2.html" %}
+  {% elif current_step == 3 %}
+    {% include "_onboarding_step3.html" %}
+  {% elif current_step == 4 %}
+    {% include "_onboarding_step4.html" %}
+  {% elif current_step == 5 %}
+    {% include "_onboarding_step5.html" %}
+  {% elif current_step == 6 %}
+    {% include "_onboarding_step6.html" %}
+  {% endif %}
+</div>
+
+<!-- Gate status summary -->
+<div class="gate-summary">
+  <h3 class="section-title">Gate Status</h3>
+  <div class="gate-pill-row">
+    <span class="gate-pill gate-pill--{{ 'complete' if gates.gate_a == 'COMPLETE' else 'pending' }}">A: Specs</span>
+    <span class="gate-pill gate-pill--{{ 'complete' if gates.gate_b == 'COMPLETE' else 'pending' }}">B: Contact</span>
+    <span class="gate-pill gate-pill--{{ 'complete' if gates.gate_1 == 'COMPLETE' else 'pending' }}">1: Connection</span>
+    <span class="gate-pill gate-pill--{{ 'complete' if gates.gate_2 == 'COMPLETE' else 'pending' }}">2: Testing</span>
+    <span class="gate-pill gate-pill--{{ 'certified' if gates.gate_3 == 'CERTIFIED' else ('complete' if gates.gate_3 == 'COMPLETE' else 'pending') }}">3: Certification</span>
+  </div>
+</div>
+{% endblock %}

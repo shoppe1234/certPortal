@@ -1,0 +1,43 @@
+<!-- Exception Request Modal -->
+<div class="modal-overlay" id="exception-modal" style="display:none">
+  <div class="modal-card">
+    <h3 class="modal-title">Request Exception</h3>
+    <p class="modal-subtitle">
+      Explain why this transaction doesn't apply to your business.
+    </p>
+    <form method="post" id="exception-form" class="step-form">
+      <div class="form-group">
+        <label class="form-label" for="reason_code">Reason</label>
+        <select id="reason_code" name="reason_code" class="form-select" required>
+          <option value="NOT_APPLICABLE">Not Applicable — we don't use this transaction</option>
+          <option value="HANDLED_EXTERNALLY">Handled Externally — managed by a third party</option>
+          <option value="DEFERRED">Deferred — we'll implement later</option>
+          <option value="RETAILER_WAIVED">Retailer Waived — retailer agreed to skip</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="note">Note (optional)</label>
+        <textarea id="note" name="note" class="form-input" rows="3"
+                  placeholder="Additional context for the retailer..."></textarea>
+      </div>
+      <input type="hidden" name="transaction_type" id="modal-tx-type">
+      <div class="modal-actions">
+        <button type="button" class="btn btn-sm" onclick="closeExceptionModal()">Cancel</button>
+        <button type="submit" class="btn btn-primary btn-sm">Submit Request</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+function openExceptionModal(scenarioId, txType) {
+  const modal = document.getElementById('exception-modal');
+  const form = document.getElementById('exception-form');
+  form.action = `/scenarios/${scenarioId}/request-exception`;
+  document.getElementById('modal-tx-type').value = txType;
+  modal.style.display = 'flex';
+}
+function closeExceptionModal() {
+  document.getElementById('exception-modal').style.display = 'none';
+}
+</script>

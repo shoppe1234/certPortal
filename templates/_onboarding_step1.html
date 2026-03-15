@@ -1,0 +1,26 @@
+<!-- Step 1: Acknowledge Specs (Gate A) -->
+<div class="onboarding-step" id="onboarding-step-1">
+  <h2 class="step-title">Step 1: Review Specifications</h2>
+  <p class="step-prompt">
+    Here are {{ retailer_slug | title }}'s EDI specifications. Download them, then confirm you've reviewed them.
+  </p>
+
+  <div class="spec-download-section">
+    <div class="spec-card">
+      <span class="spec-icon">📄</span>
+      <div class="spec-info">
+        <strong>EDI Specification Package</strong>
+        <p class="text-muted">Transaction maps, validation rules, and testing requirements</p>
+      </div>
+      <a href="/static/specs/{{ retailer_slug }}_spec.pdf" class="btn btn-sm" download>Download</a>
+    </div>
+  </div>
+
+  <form method="post" action="/onboarding/step1" class="step-form">
+    <label class="checkbox-label">
+      <input type="checkbox" name="acknowledged" required>
+      I have downloaded and reviewed {{ retailer_slug | title }}'s EDI specifications
+    </label>
+    <button type="submit" class="btn btn-primary">Acknowledge &amp; Continue</button>
+  </form>
+</div>

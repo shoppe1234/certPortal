@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}certPortal Admin — Template Library{% endblock %}
+
+
+{% block nav_links %}
+<li><a href="/" class="nav-link">Dashboard</a></li>
+<li><a href="/retailers" class="nav-link">Retailers</a></li>
+<li><a href="/suppliers" class="nav-link">Suppliers</a></li>
+<li><a href="/templates" class="nav-link active">Templates</a></li>
+<li>
+  <a href="/hitl-queue" class="nav-link">HITL Queue</a>
+</li>
+<li><a href="/monica-memory" class="nav-link">Memory</a></li>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1 class="page-title">Template Library</h1>
+    <p class="page-subtitle">Create, publish, and manage EDI configuration templates for retailers.</p>
+  </div>
+  <a href="/templates/new" class="btn btn-primary">+ New Template</a>
+</div>
+
+{% if not pam_templates %}
+<div class="empty-state">
+  <span class="empty-icon">📋</span>
+  <h3 class="empty-title">No templates yet</h3>
+  <p>Create your first template to get started.</p>
+</div>
+{% else %}
+
+<table class="data-table">
+  <thead>
+    <tr>
+      <th>Name</th>
+      <th>Slug</th>
+      <th>Category</th>
+      <th>Industry</th>
+      <th>X12</th>
+      <th>Version</th>
+      <th>Status</th>
+      <th>Updated</th>
+      <th>Actions</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for tpl in pam_templates %}
+    {% include "_template_row.html" %}
+    {% endfor %}
+  </tbody>
+</table>
+
+{% endif %}
+{% endblock %}

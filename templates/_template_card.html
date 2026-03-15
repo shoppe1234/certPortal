@@ -1,0 +1,40 @@
+<!-- Single template card (used in meredith_template_library.html) -->
+<div class="template-card">
+  <div class="template-card-header">
+    <h3 class="template-name">{{ tpl.name }}</h3>
+    <span class="badge badge-{{ tpl.category | lower }}">{{ tpl.category | replace('_', ' ') | title }}</span>
+  </div>
+  <p class="template-description">{{ tpl.description or 'No description' }}</p>
+  <div class="template-meta">
+    {% if tpl.industry %}
+    <span class="template-tag">{{ tpl.industry }}</span>
+    {% endif %}
+    <span class="template-tag">X12 {{ tpl.x12_version }}</span>
+    <span class="template-tag">v{{ tpl.version }}</span>
+  </div>
+
+  <!-- Preview toggle -->
+  <div class="template-preview-section">
+    <button class="btn btn-sm btn-outline"
+            hx-get="/template-library/{{ tpl.id }}/preview"
+            hx-target="#preview-{{ tpl.id }}"
+            hx-swap="innerHTML">
+      Preview YAML
+    </button>
+    <div id="preview-{{ tpl.id }}" class="template-preview-area"></div>
+  </div>
+
+  <!-- Actions -->
+  <div class="template-card-actions">
+    {% if tpl.id in adopted_ids %}
+      <span class="badge badge-complete">{{ adopted_ids[tpl.id] }}ED</span>
+    {% else %}
+      <form method="post" action="/template-library/{{ tpl.id }}/adopt" style="display:inline">
+        <button type="submit" class="btn btn-primary btn-sm">Adopt</button>
+      </form>
+      <form method="post" action="/template-library/{{ tpl.id }}/fork" style="display:inline">
+        <button type="submit" class="btn btn-sm btn-outline">Fork</button>
+      </form>
+    {% endif %}
+  </div>
+</div>

@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}certPortal Retailer — Exception Queue{% endblock %}
+
+
+{% block nav_links %}
+<li><a href="/" class="nav-link">Home</a></li>
+<li><a href="/spec-setup" class="nav-link">EDI Configuration</a></li>
+<li><a href="/yaml-wizard" class="nav-link">YAML Wizard</a></li>
+<li><a href="/supplier-status" class="nav-link">Supplier Status</a></li>
+<li><a href="/exception-queue" class="nav-link active">Exceptions{% if pending_count %} <span class="nav-badge">{{ pending_count }}</span>{% endif %}</a></li>
+<li><a href="/template-library" class="nav-link">Templates</a></li>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1 class="page-title">Exception Queue</h1>
+  <p class="page-subtitle">Review supplier exception requests. Approve to mark as EXEMPT, deny to keep REQUIRED.</p>
+</div>
+
+{% if not exceptions %}
+<div class="empty-state">
+  <span class="empty-icon">✓</span>
+  <h3 class="empty-title">No exception requests</h3>
+  <p>All suppliers are working through their required test scenarios.</p>
+</div>
+{% else %}
+
+<!-- Pending exceptions first -->
+{% set pending = exceptions | selectattr("status", "equalto", "PENDING") | list %}
+{% if pending %}
+<h2 class="section-title">Pending Review ({{ pending | length }})</h2>
+<div class="exception-cards">
+  {% for exc in pending %}
+  {% include "_exception_card.html" %}
+  {% endfor %}
+</div>
+{% endif %}
+
+<!-- Resolved exceptions -->
+{% set resolved = exceptions | rejectattr("status", "equalto", "PENDING") | list %}
+{% if resolved %}
+<h2 class="section-title" style="margin-top:2rem">Resolved</h2>
+<div class="exception-cards">
+  {% for exc in resolved %}
+  {% include "_exception_card.html" %}
+  {% endfor %}
+</div>
+{% endif %}
+
+{% endif %}
+{% endblock %}

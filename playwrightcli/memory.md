@@ -19,3 +19,17 @@
   Correction: Tried: networkidle
 - scope::cert-certification: Failed after 3 retries
   Correction: Tried: networkidle
+- onboarding::onb-12-step3-fill-test-ids: Failed after 3 retries
+  Correction: Tried: networkidle
+- onboarding::onb-13-step3-gate-1-set: Failed after 3 retries
+  Correction: Tried: networkidle
+- onboarding::onb-14-step4-add-item-row: Failed after 3 retries
+  Correction: Tried: networkidle
+- onboarding::onb-17-step5-scenario-list-visible: Failed after 3 retries
+  Correction: Tried: networkidle
+- onboarding::onb-18-step5-required-badges: Failed after 3 retries
+  Correction: Tried: networkidle
+- onboarding::onb-19-step5-exception-request-button: Failed after 3 retries
+  Correction: Tried: networkidle
+- onboarding::onb-20-step6-production-ids-gate3-pending: Failed after 3 retries
+  Correction: Tried: networkidle

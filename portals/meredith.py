@@ -1774,5 +1774,207 @@ async def artifact_download(
     )
 
 
+# ---------------------------------------------------------------------------
+# Protected: Exception Queue
+# ---------------------------------------------------------------------------
+
+
+@router.get("/exception-queue", response_class=HTMLResponse)
+async def exception_queue(
+    request: Request,
+    conn=Depends(get_connection),
+    user: dict = Depends(get_current_user),
+):
+    """List all PENDING exception requests for this retailer."""
+    retailer_slug = user.get("retailer_slug") or "lowes"
+    rows = await conn.fetch(
+        """SELECT * FROM exception_requests
+           WHERE retailer_slug = $1
+           ORDER BY CASE status WHEN 'PENDING' THEN 0 WHEN 'APPROVED' THEN 1 ELSE 2 END,
+                    requested_at DESC""",
+        retailer_slug,
+    )
+    pending_count = sum(1 for r in rows if r["status"] == "PENDING")
+    return templates.TemplateResponse(
+        "meredith_exception_queue.html",
+        {
+            "request": request,
+            "portal_name": "meredith",
+            "current_user": user,
+            "exceptions": [dict(r) for r in rows],
+            "pending_count": pending_count,
+        },
+    )
+
+
+@router.post("/exception-queue/{exc_id}/approve")
+async def approve_exception(
+    exc_id: int,
+    conn=Depends(get_connection),
+    user: dict = Depends(get_current_user),
+):
+    """Approve exception → mark EXEMPT, notify Kelly."""
+    row = await conn.fetchrow("SELECT * FROM exception_requests WHERE id = $1", exc_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Exception request not found")
+
+    await conn.execute(
+        """UPDATE exception_requests
+           SET status='APPROVED', resolved_at=NOW(), resolved_by=$2
+           WHERE id=$1""",
+        exc_id, user["sub"],
+    )
+
+    # Write exception_resolved signal for Kelly (INV-07)
+    ts = int(time.time())
+    workspace = S3AgentWorkspace(row["retailer_slug"], row["supplier_slug"])
+    workspace.upload(
+        f"signals/exception_resolved_{exc_id}_{ts}.json",
+        json.dumps({
+            "event_type": "exception_resolved",
+            "resolution": "APPROVED",
+            "exception_id": exc_id,
+            "supplier_slug": row["supplier_slug"],
+            "retailer_slug": row["retailer_slug"],
+            "scenario_id": row["scenario_id"],
+            "transaction_type": row["transaction_type"],
+            "timestamp": ts,
+        }),
+    )
+
+    return RedirectResponse(url="/exception-queue", status_code=302)
+
+
+@router.post("/exception-queue/{exc_id}/deny")
+async def deny_exception(
+    exc_id: int,
+    conn=Depends(get_connection),
+    user: dict = Depends(get_current_user),
+):
+    """Deny exception → stays REQUIRED, notify Kelly."""
+    row = await conn.fetchrow("SELECT * FROM exception_requests WHERE id = $1", exc_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Exception request not found")
+
+    await conn.execute(
+        """UPDATE exception_requests
+           SET status='DENIED', resolved_at=NOW(), resolved_by=$2
+           WHERE id=$1""",
+        exc_id, user["sub"],
+    )
+
+    # Write exception_resolved signal for Kelly (INV-07)
+    ts = int(time.time())
+    workspace = S3AgentWorkspace(row["retailer_slug"], row["supplier_slug"])
+    workspace.upload(
+        f"signals/exception_resolved_{exc_id}_{ts}.json",
+        json.dumps({
+            "event_type": "exception_resolved",
+            "resolution": "DENIED",
+            "exception_id": exc_id,
+            "supplier_slug": row["supplier_slug"],
+            "retailer_slug": row["retailer_slug"],
+            "scenario_id": row["scenario_id"],
+            "transaction_type": row["transaction_type"],
+            "timestamp": ts,
+        }),
+    )
+
+    return RedirectResponse(url="/exception-queue", status_code=302)
+
+
+# ---------------------------------------------------------------------------
+# Protected: Template Library (from PAM)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/template-library", response_class=HTMLResponse)
+async def template_library(
+    request: Request,
+    conn=Depends(get_connection),
+    user: dict = Depends(get_current_user),
+):
+    """Browse published PAM templates."""
+    retailer_slug = user.get("retailer_slug") or "lowes"
+    tpls = await conn.fetch(
+        """SELECT * FROM pam_templates WHERE is_published = TRUE ORDER BY category, name""",
+    )
+    adoptions = await conn.fetch(
+        """SELECT template_id, adoption_mode FROM retailer_template_adoption
+           WHERE retailer_slug = $1""",
+        retailer_slug,
+    )
+    adopted_ids = {r["template_id"]: r["adoption_mode"] for r in adoptions}
+
+    return templates.TemplateResponse(
+        "meredith_template_library.html",
+        {
+            "request": request,
+            "portal_name": "meredith",
+            "current_user": user,
+            "templates": [dict(r) for r in tpls],
+            "adopted_ids": adopted_ids,
+        },
+    )
+
+
+@router.post("/template-library/{template_id}/adopt")
+async def adopt_template(
+    template_id: int,
+    conn=Depends(get_connection),
+    user: dict = Depends(get_current_user),
+):
+    """Adopt template as-is."""
+    retailer_slug = user.get("retailer_slug") or "lowes"
+    tpl = await conn.fetchrow("SELECT * FROM pam_templates WHERE id = $1", template_id)
+    if not tpl:
+        raise HTTPException(status_code=404, detail="Template not found")
+
+    await conn.execute(
+        """INSERT INTO retailer_template_adoption (retailer_slug, template_id, adoption_mode)
+           VALUES ($1, $2, 'ADOPT')
+           ON CONFLICT DO NOTHING""",
+        retailer_slug, template_id,
+    )
+    return RedirectResponse(url="/template-library", status_code=302)
+
+
+@router.post("/template-library/{template_id}/fork")
+async def fork_template(
+    template_id: int,
+    conn=Depends(get_connection),
+    user: dict = Depends(get_current_user),
+):
+    """Fork template — clones YAML into retailer's own config."""
+    retailer_slug = user.get("retailer_slug") or "lowes"
+    tpl = await conn.fetchrow("SELECT * FROM pam_templates WHERE id = $1", template_id)
+    if not tpl:
+        raise HTTPException(status_code=404, detail="Template not found")
+
+    await conn.execute(
+        """INSERT INTO retailer_template_adoption (retailer_slug, template_id, adoption_mode, forked_content)
+           VALUES ($1, $2, 'FORK', $3)""",
+        retailer_slug, template_id, tpl["content_yaml"],
+    )
+    return RedirectResponse(url="/template-library", status_code=302)
+
+
+@router.get("/template-library/{template_id}/preview", response_class=HTMLResponse)
+async def preview_template(
+    request: Request,
+    template_id: int,
+    conn=Depends(get_connection),
+    user: dict = Depends(get_current_user),
+):
+    """HTMX partial: preview template YAML content."""
+    tpl = await conn.fetchrow("SELECT * FROM pam_templates WHERE id = $1", template_id)
+    if not tpl:
+        return HTMLResponse("<p>Template not found</p>")
+    safe_yaml = tpl["content_yaml"].replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    return HTMLResponse(
+        f'<div class="template-preview"><pre class="yaml-preview">{safe_yaml}</pre></div>'
+    )
+
+
 # Mount the protected router
 app.include_router(router)

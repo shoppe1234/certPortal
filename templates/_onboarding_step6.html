@@ -1,0 +1,52 @@
+<!-- Step 6: Production IDs + Go-Live (Gate 3) -->
+<div class="onboarding-step" id="onboarding-step-6">
+  <h2 class="step-title">Step 6: Go-Live</h2>
+  <p class="step-prompt">
+    Testing is complete. Confirm your production credentials — these may differ from your test IDs.
+    Once submitted, {{ retailer_slug | title }} activates your connection.
+  </p>
+
+  {% if gates.gate_3 == 'CERTIFIED' %}
+  <div class="cert-badge">
+    <div class="cert-badge-inner">
+      <span class="cert-check">✓</span>
+      <span class="cert-label">EDI Certified</span>
+    </div>
+    <p class="step-complete-msg">Your production connection is active. You are certified to trade EDI with {{ retailer_slug | title }}.</p>
+  </div>
+  {% elif profile.prod_confirmed %}
+  <div class="pending-approval">
+    <span class="badge badge-pending">Awaiting Certification</span>
+    <p>Your production credentials have been submitted. The {{ retailer_slug | title }} admin team will review and certify your connection.</p>
+  </div>
+  {% else %}
+  <form method="post" action="/onboarding/step6" class="step-form">
+    <div class="form-group">
+      <label class="form-label" for="prod_vendor_number">Production Vendor Number</label>
+      <input type="text" id="prod_vendor_number" name="prod_vendor_number" class="form-input" required>
+    </div>
+    <div class="form-group">
+      <label class="form-label" for="prod_edi_qualifier">Production EDI Qualifier</label>
+      <input type="text" id="prod_edi_qualifier" name="prod_edi_qualifier" class="form-input" placeholder="e.g. ZZ, 01, 08">
+    </div>
+    <div class="form-group">
+      <label class="form-label" for="prod_isa_id">Production ISA ID</label>
+      <input type="text" id="prod_isa_id" name="prod_isa_id" class="form-input" required>
+    </div>
+    <div class="form-group">
+      <label class="form-label" for="prod_gs_id">Production GS ID</label>
+      <input type="text" id="prod_gs_id" name="prod_gs_id" class="form-input" required>
+    </div>
+    <div class="form-group">
+      <label class="form-label" for="prod_connection_method">Production Connection Method</label>
+      <select id="prod_connection_method" name="prod_connection_method" class="form-select">
+        <option value="">Same as test</option>
+        <option value="AS2">AS2</option>
+        <option value="SFTP">SFTP</option>
+        <option value="FTP">FTP</option>
+      </select>
+    </div>
+    <button type="submit" class="btn btn-primary">Submit for Certification</button>
+  </form>
+  {% endif %}
+</div>

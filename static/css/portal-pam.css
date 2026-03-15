@@ -1,0 +1,7 @@
+/* PAM — Admin Portal · Pink accent · Defaults to dark mode */
+:root {
+  --color-primary: #ec4899;
+  --color-primary-dark: #db2777;
+  --color-primary-light: #fce7f3;
+  --primary-rgb: 236, 72, 153;
+}

@@ -1,0 +1,85 @@
+<!-- Step 5: Test Scenarios + Exception Requests (Gate 2) -->
+<div class="onboarding-step" id="onboarding-step-5">
+  <h2 class="step-title">Step 5: Test Scenarios</h2>
+  <p class="step-prompt">
+    {{ retailer_slug | title }} requires test scenarios. Work through each one in order —
+    submit your EDI documents and the system validates them automatically.
+    If a transaction doesn't apply to your business, request an exception.
+  </p>
+
+  <div class="scenarios-list">
+    {% set transaction_types = ['850', '855', '856', '810', '860', '865'] %}
+    {% for tx in transaction_types %}
+    <div class="scenario-card" data-transaction="{{ tx }}">
+      <div class="scenario-header">
+        <span class="scenario-tx">{{ tx }}</span>
+        <span class="badge badge-required">REQUIRED</span>
+        {% set scenario_result = None %}
+        {% for s in scenarios if s.transaction_type == tx %}
+          {% if loop.first %}
+            {% set scenario_result = s %}
+          {% endif %}
+        {% endfor %}
+        {% if scenario_result %}
+          <span class="badge badge-{{ scenario_result.status | lower }}">{{ scenario_result.status }}</span>
+        {% endif %}
+        {% set exc = None %}
+        {% for e in exceptions if e.transaction_type == tx %}
+          {% if loop.first %}
+            {% set exc = e %}
+          {% endif %}
+        {% endfor %}
+        {% if exc %}
+          <span class="badge badge-{{ exc.status | lower }}"
+                hx-get="/htmx/exception-status/{{ exc.id }}"
+                hx-trigger="every 10s"
+                hx-swap="outerHTML">
+            {{ exc.status }}
+          </span>
+        {% endif %}
+      </div>
+      <div class="scenario-actions">
+        {% if not exc or exc.status == 'DENIED' %}
+        <button class="btn btn-sm btn-outline"
+                hx-post="/scenarios/{{ tx }}/request-exception"
+                hx-vals='{"reason_code": "NOT_APPLICABLE", "transaction_type": "{{ tx }}"}'
+                hx-target="closest .scenario-card"
+                hx-swap="afterbegin"
+                title="Request exception for {{ tx }}">
+          Request Exception
+        </button>
+        {% elif exc.status == 'PENDING' %}
+        <button class="btn btn-sm btn-outline btn-danger"
+                hx-post="/scenarios/{{ tx }}/withdraw-exception"
+                hx-target="closest .scenario-card"
+                hx-swap="afterbegin"
+                title="Withdraw exception request">
+          Withdraw
+        </button>
+        {% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+
+  {% if exceptions %}
+  <div class="exception-summary">
+    <h3>Exception Requests</h3>
+    <table class="data-table">
+      <thead>
+        <tr><th>Transaction</th><th>Reason</th><th>Status</th><th>Requested</th></tr>
+      </thead>
+      <tbody>
+        {% for exc in exceptions %}
+        <tr>
+          <td>{{ exc.transaction_type }}</td>
+          <td>{{ exc.reason_code | replace('_', ' ') | title }}</td>
+          <td><span class="badge badge-{{ exc.status | lower }}">{{ exc.status }}</span></td>
+          <td>{{ exc.requested_at.strftime('%Y-%m-%d %H:%M') if exc.requested_at else '' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</div>

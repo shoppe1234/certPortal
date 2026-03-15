@@ -1,0 +1,29 @@
+<!-- Single template row (used in pam_templates.html) -->
+<tr>
+  <td><a href="/templates/{{ tpl.id }}">{{ tpl.name }}</a></td>
+  <td class="mono">{{ tpl.template_slug }}</td>
+  <td>{{ tpl.category | replace('_', ' ') | title }}</td>
+  <td>{{ tpl.industry or '—' }}</td>
+  <td>{{ tpl.x12_version }}</td>
+  <td>v{{ tpl.version }}</td>
+  <td>
+    {% if tpl.is_published %}
+    <span class="badge badge-complete">Published</span>
+    {% else %}
+    <span class="badge badge-pending">Draft</span>
+    {% endif %}
+  </td>
+  <td>{{ tpl.updated_at.strftime('%Y-%m-%d') if tpl.updated_at else '' }}</td>
+  <td>
+    <a href="/templates/{{ tpl.id }}" class="btn btn-xs">Edit</a>
+    {% if not tpl.is_published %}
+    <form method="post" action="/templates/{{ tpl.id }}/publish" style="display:inline">
+      <button type="submit" class="btn btn-xs btn-success">Publish</button>
+    </form>
+    {% else %}
+    <form method="post" action="/templates/{{ tpl.id }}/unpublish" style="display:inline">
+      <button type="submit" class="btn btn-xs btn-outline">Unpublish</button>
+    </form>
+    {% endif %}
+  </td>
+</tr>

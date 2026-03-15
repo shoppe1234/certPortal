@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% block title %}certPortal Admin — {% if mode == 'create' %}New Template{% else %}Edit Template{% endif %}{% endblock %}
+
+
+{% block nav_links %}
+<li><a href="/" class="nav-link">Dashboard</a></li>
+<li><a href="/retailers" class="nav-link">Retailers</a></li>
+<li><a href="/suppliers" class="nav-link">Suppliers</a></li>
+<li><a href="/templates" class="nav-link active">Templates</a></li>
+<li><a href="/hitl-queue" class="nav-link">HITL Queue</a></li>
+<li><a href="/monica-memory" class="nav-link">Memory</a></li>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1 class="page-title">{% if mode == 'create' %}New Template{% else %}Edit: {{ tpl.name }}{% endif %}</h1>
+  <a href="/templates" class="btn btn-sm">← Back to Library</a>
+</div>
+
+<form method="{% if mode == 'create' %}post{% else %}post{% endif %}"
+      action="{% if mode == 'create' %}/templates{% else %}/templates/{{ tpl.id }}/update{% endif %}"
+      class="template-editor-form">
+
+  {% if mode == 'edit' %}
+  <input type="hidden" name="_method" value="PUT">
+  {% endif %}
+
+  <div class="form-row">
+    <div class="form-group">
+      <label class="form-label" for="template_slug">Slug</label>
+      <input type="text" id="template_slug" name="template_slug" class="form-input"
+             value="{{ tpl.template_slug if tpl else '' }}"
+             {% if mode == 'edit' %}readonly{% endif %}
+             required pattern="[a-z0-9\-]+" placeholder="e.g. standard-retail-otc">
+    </div>
+    <div class="form-group">
+      <label class="form-label" for="name">Name</label>
+      <input type="text" id="name" name="name" class="form-input"
+             value="{{ tpl.name if tpl else '' }}" required>
+    </div>
+  </div>
+
+  <div class="form-group">
+    <label class="form-label" for="description">Description</label>
+    <input type="text" id="description" name="description" class="form-input"
+           value="{{ tpl.description if tpl else '' }}">
+  </div>
+
+  <div class="form-row">
+    <div class="form-group">
+      <label class="form-label" for="category">Category</label>
+      <select id="category" name="category" class="form-select" required>
+        <option value="lifecycle" {% if tpl and tpl.category == 'lifecycle' %}selected{% endif %}>Lifecycle</option>
+        <option value="scenario_bundle" {% if tpl and tpl.category == 'scenario_bundle' %}selected{% endif %}>Scenario Bundle</option>
+        <option value="layer2_preset" {% if tpl and tpl.category == 'layer2_preset' %}selected{% endif %}>Layer 2 Preset</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label" for="industry">Industry</label>
+      <input type="text" id="industry" name="industry" class="form-input"
+             value="{{ tpl.industry if tpl else '' }}" placeholder="e.g. retail, grocery">
+    </div>
+    <div class="form-group">
+      <label class="form-label" for="x12_version">X12 Version</label>
+      <select id="x12_version" name="x12_version" class="form-select">
+        <option value="4010" {% if tpl and tpl.x12_version == '4010' %}selected{% endif %}>4010</option>
+        <option value="4030" {% if tpl and tpl.x12_version == '4030' %}selected{% endif %}>4030</option>
+        <option value="5010" {% if tpl and tpl.x12_version == '5010' %}selected{% endif %}>5010</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="form-group">
+    <label class="form-label" for="content_yaml">YAML Content</label>
+    <textarea id="content_yaml" name="content_yaml" class="form-input yaml-editor" rows="20"
+              required>{{ tpl.content_yaml if tpl else '---\n' }}</textarea>
+  </div>
+
+  <div class="form-actions">
+    <button type="submit" class="btn btn-primary">
+      {% if mode == 'create' %}Create Template{% else %}Save Changes{% endif %}
+    </button>
+    {% if mode == 'edit' %}
+    <div class="form-actions-right">
+      {% if tpl.is_published %}
+      <form method="post" action="/templates/{{ tpl.id }}/unpublish" style="display:inline">
+        <button type="submit" class="btn btn-sm btn-outline">Unpublish</button>
+      </form>
+      {% else %}
+      <form method="post" action="/templates/{{ tpl.id }}/publish" style="display:inline">
+        <button type="submit" class="btn btn-success btn-sm">Publish</button>
+      </form>
+      {% endif %}
+      <form method="post" action="/templates/{{ tpl.id }}/version" style="display:inline">
+        <button type="submit" class="btn btn-sm btn-outline">Bump Version (v{{ tpl.version }})</button>
+      </form>
+    </div>
+    {% endif %}
+  </div>
+</form>
+{% endblock %}

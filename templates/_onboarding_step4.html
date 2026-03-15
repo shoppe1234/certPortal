@@ -1,0 +1,109 @@
+<!-- Step 4: Item Data -->
+<div class="onboarding-step" id="onboarding-step-4">
+  <h2 class="step-title">Step 4: Item Data</h2>
+  <p class="step-prompt">
+    {{ retailer_slug | title }} requires test items. Enter your vendor part numbers below
+    so your test POs contain real data. CSV upload is available.
+  </p>
+
+  <form method="post" action="/onboarding/step4" class="step-form" id="items-form">
+    <div class="item-table-section">
+      <table class="data-table" id="items-table">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Vendor Part Number</th>
+            <th>Description</th>
+            <th>UOM</th>
+            <th>Location</th>
+          </tr>
+        </thead>
+        <tbody id="items-tbody">
+          {% set items = profile.items_json if profile.items_json else [] %}
+          {% if items %}
+            {% for item in items %}
+            <tr class="item-row">
+              <td>{{ loop.index }}</td>
+              <td><input type="text" class="form-input item-field" data-field="vendor_part_number" value="{{ item.vendor_part_number or '' }}"></td>
+              <td><input type="text" class="form-input item-field" data-field="description" value="{{ item.description or '' }}"></td>
+              <td><input type="text" class="form-input item-field" data-field="uom" value="{{ item.uom or '' }}" placeholder="EA"></td>
+              <td><input type="text" class="form-input item-field" data-field="location" value="{{ item.location or '' }}"></td>
+            </tr>
+            {% endfor %}
+          {% else %}
+            {% for i in range(3) %}
+            <tr class="item-row">
+              <td>{{ i + 1 }}</td>
+              <td><input type="text" class="form-input item-field" data-field="vendor_part_number" value=""></td>
+              <td><input type="text" class="form-input item-field" data-field="description" value=""></td>
+              <td><input type="text" class="form-input item-field" data-field="uom" value="" placeholder="EA"></td>
+              <td><input type="text" class="form-input item-field" data-field="location" value=""></td>
+            </tr>
+            {% endfor %}
+          {% endif %}
+        </tbody>
+      </table>
+      <button type="button" class="btn btn-sm" onclick="addItemRow()">+ Add Row</button>
+    </div>
+
+    <div class="csv-upload-section">
+      <label class="form-label">Or upload CSV</label>
+      <input type="file" id="csv-upload" accept=".csv" class="form-input" onchange="handleCSV(this)">
+    </div>
+
+    <input type="hidden" name="items_json" id="items-json-field">
+    <button type="submit" class="btn btn-primary" onclick="collectItems()">Save Items</button>
+  </form>
+</div>
+
+{% block extra_js %}
+<script>
+function addItemRow() {
+  const tbody = document.getElementById('items-tbody');
+  const idx = tbody.children.length + 1;
+  const tr = document.createElement('tr');
+  tr.className = 'item-row';
+  tr.innerHTML = `<td>${idx}</td>
+    <td><input type="text" class="form-input item-field" data-field="vendor_part_number"></td>
+    <td><input type="text" class="form-input item-field" data-field="description"></td>
+    <td><input type="text" class="form-input item-field" data-field="uom" placeholder="EA"></td>
+    <td><input type="text" class="form-input item-field" data-field="location"></td>`;
+  tbody.appendChild(tr);
+}
+
+function collectItems() {
+  const rows = document.querySelectorAll('.item-row');
+  const items = [];
+  rows.forEach(row => {
+    const fields = row.querySelectorAll('.item-field');
+    const item = {};
+    fields.forEach(f => { item[f.dataset.field] = f.value; });
+    if (item.vendor_part_number) items.push(item);
+  });
+  document.getElementById('items-json-field').value = JSON.stringify(items);
+}
+
+function handleCSV(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    const lines = e.target.result.split('\n').filter(l => l.trim());
+    const tbody = document.getElementById('items-tbody');
+    tbody.innerHTML = '';
+    lines.slice(1).forEach((line, i) => {
+      const cols = line.split(',').map(c => c.trim().replace(/^"|"$/g, ''));
+      const tr = document.createElement('tr');
+      tr.className = 'item-row';
+      tr.innerHTML = `<td>${i+1}</td>
+        <td><input type="text" class="form-input item-field" data-field="vendor_part_number" value="${cols[0]||''}"></td>
+        <td><input type="text" class="form-input item-field" data-field="description" value="${cols[1]||''}"></td>
+        <td><input type="text" class="form-input item-field" data-field="uom" value="${cols[2]||'EA'}"></td>
+        <td><input type="text" class="form-input item-field" data-field="location" value="${cols[3]||''}"></td>`;
+      tbody.appendChild(tr);
+    });
+  };
+  reader.readAsText(file);
+}
+</script>
+{% endblock %}

@@ -1,15 +1,14 @@
 {% extends "base.html" %}
 {% block title %}certPortal Retailer — Home{% endblock %}
-{% block fonts %}
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-{% endblock %}
+
 
 {% block nav_links %}
 <li><a href="/" class="nav-link active">Home</a></li>
 <li><a href="/spec-setup" class="nav-link">EDI Configuration</a></li>
 <li><a href="/yaml-wizard" class="nav-link">YAML Wizard</a></li>
 <li><a href="/supplier-status" class="nav-link">Supplier Status</a></li>
+<li><a href="/exception-queue" class="nav-link">Exceptions</a></li>
+<li><a href="/template-library" class="nav-link">Templates</a></li>
 {% endblock %}
 
 {% block content %}

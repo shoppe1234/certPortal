@@ -1,0 +1,41 @@
+<!-- Step 3: Connection + Test EDI IDs (Gate 1) -->
+<div class="onboarding-step" id="onboarding-step-3">
+  <h2 class="step-title">Step 3: Connection &amp; Test EDI Identifiers</h2>
+  <p class="step-prompt">
+    Select your connection method and enter your test EDI identifiers.
+    Production IDs come later — at go-live.
+  </p>
+
+  <form method="post" action="/onboarding/step3" class="step-form">
+    <div class="form-group">
+      <label class="form-label" for="connection_method">Connection Method</label>
+      <select id="connection_method" name="connection_method" class="form-select" required>
+        <option value="">Select...</option>
+        <option value="AS2" {% if profile.connection_method == 'AS2' %}selected{% endif %}>AS2</option>
+        <option value="SFTP" {% if profile.connection_method == 'SFTP' %}selected{% endif %}>SFTP</option>
+        <option value="FTP" {% if profile.connection_method == 'FTP' %}selected{% endif %}>FTP</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label" for="test_vendor_number">Test Vendor Number</label>
+      <input type="text" id="test_vendor_number" name="test_vendor_number" class="form-input"
+             value="{{ profile.test_vendor_number or '' }}" required>
+    </div>
+    <div class="form-group">
+      <label class="form-label" for="test_edi_qualifier">EDI Qualifier</label>
+      <input type="text" id="test_edi_qualifier" name="test_edi_qualifier" class="form-input"
+             value="{{ profile.test_edi_qualifier or '' }}" placeholder="e.g. ZZ, 01, 08">
+    </div>
+    <div class="form-group">
+      <label class="form-label" for="test_isa_id">Test ISA ID</label>
+      <input type="text" id="test_isa_id" name="test_isa_id" class="form-input"
+             value="{{ profile.test_isa_id or '' }}" required>
+    </div>
+    <div class="form-group">
+      <label class="form-label" for="test_gs_id">Test GS ID</label>
+      <input type="text" id="test_gs_id" name="test_gs_id" class="form-input"
+             value="{{ profile.test_gs_id or '' }}" required>
+    </div>
+    <button type="submit" class="btn btn-primary">Save &amp; Continue</button>
+  </form>
+</div>

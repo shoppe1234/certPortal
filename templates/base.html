@@ -9,12 +9,19 @@
   <!-- HTMX -->
   <script src="https://unpkg.com/htmx.org@1.9.12" integrity="sha384-ujb1lZYygJmzgSwoxRggbCHcjc0rB2XoQrxeTUQyRjrOnlCoYta87iKBWq3EsdM2" crossorigin="anonymous"></script>
 
-  <!-- Per-portal Google Fonts -->
-  {% block fonts %}{% endblock %}
+  <!-- Shared font: Plus Jakarta Sans for all portals -->
+  {% block fonts %}
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  {% endblock %}
 
-  <!-- Portal-specific stylesheet -->
-  <link rel="stylesheet" href="/static/css/{{ portal_name }}.css">
+  <!-- Unified design system + portal accent override -->
+  <link rel="stylesheet" href="/static/css/certportal-core.css">
+  <link rel="stylesheet" href="/static/css/portal-{{ portal_name }}.css">
   {% block extra_css %}{% endblock %}
+
+  <!-- Theme toggle (must run before body paint to prevent flash) -->
+  <script src="/static/js/theme.js"></script>
 </head>
 <body class="portal-{{ portal_name }}">
 
@@ -28,6 +35,11 @@
       {% block nav_links %}{% endblock %}
     </ul>
     <div class="nav-right">
+      <button class="theme-toggle" id="theme-toggle"
+              onclick="toggleTheme()" title="Toggle dark mode"
+              aria-label="Toggle dark mode">
+        <span class="theme-toggle-icon" id="theme-icon">☀</span>
+      </button>
       <span class="nav-time" id="nav-clock"
             hx-get="/health" hx-trigger="every 60s" hx-swap="none">
       </span>

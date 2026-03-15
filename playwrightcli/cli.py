@@ -32,7 +32,8 @@ def _preflight(portal_names: list[str]) -> bool:
     """HTTP GET /health for each portal. Returns True if all respond 200."""
     all_ok = True
     for name in portal_names:
-        if name in ("scope", "rbac", "lifecycle-wizard", "layer2-wizard", "wizard-session", "health"):
+        if name in ("scope", "rbac", "lifecycle-wizard", "layer2-wizard", "wizard-session", "health",
+                    "onboarding", "exception", "template", "gate-model", "visual"):
             continue  # standalone flows check portals already covered by pam/meredith/chrissy
         url = PORTALS[name]["url"] + "/health"
         try:
@@ -65,6 +66,7 @@ async def _run_portal(
     from playwright.async_api import async_playwright
 
     flow_map = {
+        # Existing
         "pam":              ("playwrightcli.flows.pam_flow",              "PamFlow"),
         "meredith":         ("playwrightcli.flows.meredith_flow",         "MeredithFlow"),
         "chrissy":          ("playwrightcli.flows.chrissy_flow",          "ChrissyFlow"),
@@ -74,6 +76,12 @@ async def _run_portal(
         "layer2-wizard":    ("playwrightcli.flows.layer2_wizard_flow",    "Layer2WizardFlow"),
         "wizard-session":   ("playwrightcli.flows.wizard_session_flow",   "WizardSessionFlow"),
         "health":           ("playwrightcli.flows.health_flow",            "HealthFlow"),
+        # New (Phase 6)
+        "onboarding":       ("playwrightcli.flows.onboarding_flow",       "OnboardingFlow"),
+        "exception":        ("playwrightcli.flows.exception_flow",        "ExceptionFlow"),
+        "template":         ("playwrightcli.flows.template_flow",         "TemplateFlow"),
+        "gate-model":       ("playwrightcli.flows.gate_model_flow",       "GateModelFlow"),
+        "visual":           ("playwrightcli.flows.visual_regression_flow","VisualRegressionFlow"),
     }
     module_path, class_name = flow_map[name]
     import importlib
@@ -86,7 +94,8 @@ async def _run_portal(
         page = await ctx.new_page()
         try:
             # Standalone flows — no portal config or observer queue
-            if name in ("scope", "rbac", "lifecycle-wizard", "layer2-wizard", "wizard-session", "health"):
+            if name in ("scope", "rbac", "lifecycle-wizard", "layer2-wizard", "wizard-session", "health",
+                         "onboarding", "exception", "template", "gate-model", "visual"):
                 flow = FlowClass(page=page, runner=runner, verifier=verifier)
             else:
                 flow = FlowClass(
@@ -155,6 +164,11 @@ def _dry_run(portal_names: list[str], mm: MemoryManager, verify: bool = False) -
     from playwrightcli.flows.layer2_wizard_flow import LAYER2_WIZARD_STEPS
     from playwrightcli.flows.wizard_session_flow import WIZARD_SESSION_STEPS
     from playwrightcli.flows.health_flow import HEALTH_STEPS
+    from playwrightcli.flows.onboarding_flow import ONBOARDING_STEPS
+    from playwrightcli.flows.exception_flow import EXCEPTION_STEPS
+    from playwrightcli.flows.template_flow import TEMPLATE_STEPS
+    from playwrightcli.flows.gate_model_flow import GATE_MODEL_STEPS
+    from playwrightcli.flows.visual_regression_flow import VISUAL_STEPS
 
     step_map = {
         "pam":              PAM_STEPS,
@@ -166,6 +180,11 @@ def _dry_run(portal_names: list[str], mm: MemoryManager, verify: bool = False) -
         "layer2-wizard":    LAYER2_WIZARD_STEPS,
         "wizard-session":   WIZARD_SESSION_STEPS,
         "health":           HEALTH_STEPS,
+        "onboarding":       ONBOARDING_STEPS,
+        "exception":        EXCEPTION_STEPS,
+        "template":         TEMPLATE_STEPS,
+        "gate-model":       GATE_MODEL_STEPS,
+        "visual":           VISUAL_STEPS,
     }
 
     # Requirement IDs that will be checked per step
@@ -228,6 +247,61 @@ def _dry_run(portal_names: list[str], mm: MemoryManager, verify: bool = False) -
         "health::meredith": ["HEALTH-HTMX-01..02", "HEALTH-SRI-01..02", "HEALTH-BTN-01..02", "HEALTH-CONSOLE-01", "HEALTH-ASSET-01..03"],
         "health::chrissy":  ["HEALTH-HTMX-01..02", "HEALTH-SRI-01..02", "HEALTH-BTN-01..02", "HEALTH-CONSOLE-01", "HEALTH-ASSET-01..03"],
         "health::wizard":   ["HEALTH-WIZ-01..02", "HEALTH-CONSOLE-02"],
+        # Onboarding (Phase 6)
+        "onboarding::spec-download":       ["ONB-01"],
+        "onboarding::acknowledge":         ["ONB-02", "ONB-03"],
+        "onboarding::contact-form":        ["ONB-04", "ONB-05"],
+        "onboarding::connection-method":   ["ONB-06"],
+        "onboarding::test-ids":            ["ONB-07", "ONB-08"],
+        "onboarding::item-table":          ["ONB-09", "ONB-10"],
+        "onboarding::items-complete":      ["ONB-11"],
+        "onboarding::scenario-list":       ["ONB-12", "ONB-13"],
+        "onboarding::exception-button":    ["ONB-14"],
+        "onboarding::moses-validation":    ["ONB-15"],
+        "onboarding::gate2-formula":       ["ONB-16"],
+        "onboarding::prod-ids-empty":      ["ONB-17"],
+        "onboarding::submit-gate3":        ["ONB-18"],
+        "onboarding::pam-certify":         ["ONB-19"],
+        "onboarding::kelly-cert-email":    ["ONB-20"],
+        # Exception (Phase 6)
+        "exception::reason-dropdown":      ["EXC-01"],
+        "exception::note-optional":        ["EXC-02"],
+        "exception::status-pending":       ["EXC-03"],
+        "exception::appears-meredith":     ["EXC-04"],
+        "exception::kelly-request-signal": ["EXC-05"],
+        "exception::approve-exempt":       ["EXC-06"],
+        "exception::deny-required":        ["EXC-07"],
+        "exception::kelly-resolve-signal": ["EXC-08"],
+        "exception::withdraw":             ["EXC-09"],
+        "exception::gate2-blocked":        ["EXC-10"],
+        "exception::gate2-passes":         ["EXC-11"],
+        "exception::history-visible":      ["EXC-12"],
+        # Template (Phase 6)
+        "template::create-form":           ["TPL-01"],
+        "template::save-yaml":             ["TPL-02"],
+        "template::publish":               ["TPL-03"],
+        "template::unpublished-hidden":    ["TPL-04"],
+        "template::meredith-visible":      ["TPL-05"],
+        "template::adopt":                 ["TPL-06"],
+        "template::fork":                  ["TPL-07"],
+        "template::fork-editable":         ["TPL-08"],
+        "template::chrissy-transparent":   ["TPL-09"],
+        "template::seed-visible":          ["TPL-10"],
+        # Gate Model (Phase 6)
+        "gate-model::gate-a-enforced":     ["GATE-01"],
+        "gate-model::gate-b-enforced":     ["GATE-02"],
+        "gate-model::gate-1-enforced":     ["GATE-03"],
+        "gate-model::gates-sequential":    ["GATE-04"],
+        "gate-model::binary-states":       ["GATE-05"],
+        "gate-model::chrissy-progress":    ["GATE-06"],
+        "gate-model::pam-dashboard":       ["GATE-07"],
+        "gate-model::audit-trail":         ["GATE-08"],
+        # Visual Regression (Phase 9 — placeholder)
+        "visual::design-system":           ["VIS-01"],
+        "visual::accent-colors":           ["VIS-02"],
+        "visual::dark-mode":               ["VIS-03"],
+        "visual::nav-consistency":          ["VIS-04"],
+        "visual::responsive":              ["VIS-05"],
     }
 
     print("\n--- DRY RUN (no browser opened) ---\n")
@@ -283,7 +357,8 @@ def main() -> None:
     parser.add_argument(
         "--portal",
         choices=["pam", "meredith", "chrissy", "scope", "rbac",
-                 "lifecycle-wizard", "layer2-wizard", "wizard-session", "health", "all"],
+                 "lifecycle-wizard", "layer2-wizard", "wizard-session", "health",
+                 "onboarding", "exception", "template", "gate-model", "visual", "all"],
         default="all",
         help="Which portal(s) to test (default: all)",
     )
@@ -351,7 +426,8 @@ def main() -> None:
 
     portal_names = (
         ["pam", "meredith", "chrissy", "scope", "rbac",
-         "lifecycle-wizard", "layer2-wizard", "wizard-session", "health"]
+         "lifecycle-wizard", "layer2-wizard", "wizard-session", "health",
+         "onboarding", "exception", "template", "gate-model", "visual"]
         if args.portal == "all" else [args.portal]
     )
 

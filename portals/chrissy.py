@@ -42,7 +42,13 @@ from certportal.core.auth import (
 )
 from certportal.core.email_utils import send_reset_email
 from certportal.core.database import get_connection, get_pool
-from certportal.core.gate_enforcer import get_gate_status
+from certportal.core.gate_enforcer import (
+    GateOrderViolation,
+    compute_current_step,
+    get_gate_status,
+    get_onboarding_profile,
+    transition_gate,
+)
 from certportal.core.workspace import S3AgentWorkspace
 
 BASE_DIR = Path(__file__).parent.parent
@@ -796,6 +802,294 @@ async def change_password(
     return RedirectResponse(
         url="/change-password?msg=Password+changed+successfully", status_code=302
     )
+
+
+# ---------------------------------------------------------------------------
+# Protected: Onboarding Wizard (6-step flow)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/onboarding", response_class=HTMLResponse)
+async def onboarding(
+    request: Request,
+    conn=Depends(get_connection),
+    user: dict = Depends(get_current_user),
+):
+    """Render the onboarding wizard; determine current step from gate state."""
+    supplier_slug = user.get("supplier_slug") or "demo"
+    retailer_slug = user.get("retailer_slug") or "lowes"
+
+    current_step = await compute_current_step(supplier_slug, conn)
+    gates = await get_gate_status(supplier_slug, conn)
+    profile = await get_onboarding_profile(supplier_slug, conn)
+    if profile is None:
+        # Auto-create onboarding profile on first visit
+        await conn.execute(
+            "INSERT INTO supplier_onboarding (supplier_slug, retailer_slug) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+            supplier_slug, retailer_slug,
+        )
+        profile = {"supplier_slug": supplier_slug, "retailer_slug": retailer_slug,
+                    "specs_acknowledged": False, "items_complete": False}
+
+    # Fetch exception requests for step 5
+    exceptions = [dict(r) for r in await conn.fetch(
+        "SELECT * FROM exception_requests WHERE supplier_slug = $1 AND retailer_slug = $2 ORDER BY requested_at DESC",
+        supplier_slug, retailer_slug,
+    )]
+
+    # Fetch test occurrences for step 5 scenario list
+    scenarios = [dict(r) for r in await conn.fetch(
+        "SELECT * FROM test_occurrences WHERE supplier_slug = $1 ORDER BY validated_at DESC",
+        supplier_slug,
+    )]
+
+    return templates.TemplateResponse(
+        "chrissy_onboarding.html",
+        {
+            "request": request,
+            "portal_name": "chrissy",
+            "current_user": user,
+            "current_step": current_step,
+            "gates": gates,
+            "profile": profile,
+            "exceptions": exceptions,
+            "scenarios": scenarios,
+            "supplier_slug": supplier_slug,
+            "retailer_slug": retailer_slug,
+        },
+    )
+
+
+@router.post("/onboarding/step1")
+async def onboarding_step1(
+    request: Request,
+    conn=Depends(get_connection),
+    user: dict = Depends(get_current_user),
+):
+    """Acknowledge specs → set specs_acknowledged=TRUE, advance Gate A."""
+    supplier_slug = user.get("supplier_slug") or "demo"
+    await conn.execute(
+        "UPDATE supplier_onboarding SET specs_acknowledged = TRUE, updated_at = NOW() WHERE supplier_slug = $1",
+        supplier_slug,
+    )
+    await transition_gate(supplier_slug, "a", "COMPLETE", user["sub"], conn)
+    return RedirectResponse(url="/onboarding", status_code=302)
+
+
+@router.post("/onboarding/step2")
+async def onboarding_step2(
+    request: Request,
+    company_name: str = Form(...),
+    contact_name: str = Form(...),
+    contact_email: str = Form(...),
+    contact_phone: str = Form(...),
+    conn=Depends(get_connection),
+    user: dict = Depends(get_current_user),
+):
+    """Save company + contact fields, advance Gate B."""
+    supplier_slug = user.get("supplier_slug") or "demo"
+    if not all([company_name.strip(), contact_name.strip(), contact_email.strip(), contact_phone.strip()]):
+        return RedirectResponse(url="/onboarding?error=All+contact+fields+are+required", status_code=302)
+
+    await conn.execute(
+        """UPDATE supplier_onboarding
+           SET company_name=$2, contact_name=$3, contact_email=$4, contact_phone=$5, updated_at=NOW()
+           WHERE supplier_slug=$1""",
+        supplier_slug, company_name.strip(), contact_name.strip(),
+        contact_email.strip(), contact_phone.strip(),
+    )
+    await transition_gate(supplier_slug, "b", "COMPLETE", user["sub"], conn)
+    return RedirectResponse(url="/onboarding", status_code=302)
+
+
+@router.post("/onboarding/step3")
+async def onboarding_step3(
+    request: Request,
+    connection_method: str = Form(...),
+    test_vendor_number: str = Form(...),
+    test_isa_id: str = Form(...),
+    test_gs_id: str = Form(...),
+    test_edi_qualifier: str = Form(""),
+    conn=Depends(get_connection),
+    user: dict = Depends(get_current_user),
+):
+    """Save connection method + test EDI IDs, advance Gate 1."""
+    supplier_slug = user.get("supplier_slug") or "demo"
+    retailer_slug = user.get("retailer_slug") or "lowes"
+
+    await conn.execute(
+        """UPDATE supplier_onboarding
+           SET connection_method=$2, test_vendor_number=$3, test_edi_qualifier=$4,
+               test_isa_id=$5, test_gs_id=$6, updated_at=NOW()
+           WHERE supplier_slug=$1""",
+        supplier_slug, connection_method, test_vendor_number,
+        test_edi_qualifier, test_isa_id, test_gs_id,
+    )
+    await transition_gate(supplier_slug, 1, "COMPLETE", user["sub"], conn)
+
+    # Write gate1_complete signal for Kelly (INV-07: S3 only, no agent import)
+    ts = int(time.time())
+    workspace = S3AgentWorkspace(retailer_slug, supplier_slug)
+    workspace.upload(
+        f"signals/gate1_complete_{supplier_slug}_{ts}.json",
+        json.dumps({
+            "event_type": "gate1_complete",
+            "supplier_slug": supplier_slug,
+            "retailer_slug": retailer_slug,
+            "timestamp": ts,
+            "message": f"Test environment ready for {supplier_slug}",
+        }),
+    )
+    return RedirectResponse(url="/onboarding", status_code=302)
+
+
+@router.post("/onboarding/step4")
+async def onboarding_step4(
+    request: Request,
+    conn=Depends(get_connection),
+    user: dict = Depends(get_current_user),
+):
+    """Save item data. Expects JSON body with items array."""
+    supplier_slug = user.get("supplier_slug") or "demo"
+    form = await request.form()
+    items_raw = form.get("items_json", "[]")
+    try:
+        items = json.loads(items_raw)
+    except json.JSONDecodeError:
+        items = []
+
+    items_complete = len(items) > 0 and all(
+        item.get("vendor_part_number") for item in items
+    )
+
+    await conn.execute(
+        """UPDATE supplier_onboarding
+           SET items_json=$2::jsonb, items_complete=$3, updated_at=NOW()
+           WHERE supplier_slug=$1""",
+        supplier_slug, json.dumps(items), items_complete,
+    )
+    return RedirectResponse(url="/onboarding", status_code=302)
+
+
+@router.post("/onboarding/step6")
+async def onboarding_step6(
+    request: Request,
+    prod_vendor_number: str = Form(...),
+    prod_isa_id: str = Form(...),
+    prod_gs_id: str = Form(...),
+    prod_edi_qualifier: str = Form(""),
+    prod_connection_method: str = Form(""),
+    conn=Depends(get_connection),
+    user: dict = Depends(get_current_user),
+):
+    """Save production IDs + confirmation, set Gate 3 = PENDING (awaiting PAM approval)."""
+    supplier_slug = user.get("supplier_slug") or "demo"
+
+    await conn.execute(
+        """UPDATE supplier_onboarding
+           SET prod_vendor_number=$2, prod_edi_qualifier=$3, prod_isa_id=$4,
+               prod_gs_id=$5, prod_connection_method=$6, prod_confirmed=TRUE, updated_at=NOW()
+           WHERE supplier_slug=$1""",
+        supplier_slug, prod_vendor_number, prod_edi_qualifier,
+        prod_isa_id, prod_gs_id, prod_connection_method,
+    )
+    # Gate 3 stays PENDING — PAM admin certifies it
+    return RedirectResponse(url="/onboarding", status_code=302)
+
+
+# ---------------------------------------------------------------------------
+# Protected: Exception Requests
+# ---------------------------------------------------------------------------
+
+
+@router.post("/scenarios/{scenario_id}/request-exception")
+async def request_exception(
+    request: Request,
+    scenario_id: str,
+    conn=Depends(get_connection),
+    user: dict = Depends(get_current_user),
+):
+    """Create an exception request for a test scenario."""
+    supplier_slug = user.get("supplier_slug") or "demo"
+    retailer_slug = user.get("retailer_slug") or "lowes"
+    form = await request.form()
+    reason_code = form.get("reason_code", "NOT_APPLICABLE")
+    note = form.get("note", "")
+    transaction_type = form.get("transaction_type", "850")
+
+    await conn.execute(
+        """INSERT INTO exception_requests
+           (supplier_slug, retailer_slug, scenario_id, transaction_type, reason_code, note)
+           VALUES ($1, $2, $3, $4, $5, $6)
+           ON CONFLICT (supplier_slug, retailer_slug, scenario_id, transaction_type, status) DO NOTHING""",
+        supplier_slug, retailer_slug, scenario_id, transaction_type,
+        reason_code, note or None,
+    )
+
+    # Write exception_requested signal for Kelly (INV-07)
+    ts = int(time.time())
+    workspace = S3AgentWorkspace(retailer_slug, supplier_slug)
+    workspace.upload(
+        f"signals/exception_requested_{scenario_id}_{ts}.json",
+        json.dumps({
+            "event_type": "exception_requested",
+            "supplier_slug": supplier_slug,
+            "retailer_slug": retailer_slug,
+            "scenario_id": scenario_id,
+            "transaction_type": transaction_type,
+            "reason_code": reason_code,
+            "timestamp": ts,
+        }),
+    )
+
+    # Return HTMX partial or redirect
+    if request.headers.get("hx-request"):
+        return HTMLResponse(
+            f'<span class="badge badge-pending">PENDING</span>'
+            f'<small>Exception requested</small>'
+        )
+    return RedirectResponse(url="/onboarding", status_code=302)
+
+
+@router.post("/scenarios/{scenario_id}/withdraw-exception")
+async def withdraw_exception(
+    request: Request,
+    scenario_id: str,
+    conn=Depends(get_connection),
+    user: dict = Depends(get_current_user),
+):
+    """Withdraw a PENDING exception request."""
+    supplier_slug = user.get("supplier_slug") or "demo"
+    retailer_slug = user.get("retailer_slug") or "lowes"
+
+    result = await conn.execute(
+        """DELETE FROM exception_requests
+           WHERE supplier_slug=$1 AND retailer_slug=$2 AND scenario_id=$3 AND status='PENDING'""",
+        supplier_slug, retailer_slug, scenario_id,
+    )
+    if request.headers.get("hx-request"):
+        return HTMLResponse('<span class="badge badge-withdrawn">Withdrawn</span>')
+    return RedirectResponse(url="/onboarding", status_code=302)
+
+
+@router.get("/htmx/exception-status/{exc_id}", response_class=HTMLResponse)
+async def exception_status_partial(
+    request: Request,
+    exc_id: int,
+    conn=Depends(get_connection),
+    user: dict = Depends(get_current_user),
+):
+    """HTMX partial: live status of an exception request."""
+    row = await conn.fetchrow(
+        "SELECT status, reason_code, resolved_at FROM exception_requests WHERE id = $1",
+        exc_id,
+    )
+    if not row:
+        return HTMLResponse('<span class="badge">Not found</span>')
+    status_class = {"PENDING": "badge-pending", "APPROVED": "badge-complete", "DENIED": "badge-denied"}.get(
+        row["status"], "badge-pending"
+    )
+    return HTMLResponse(f'<span class="badge {status_class}">{row["status"]}</span>')
 
 
 # Mount the protected router
