@@ -8,6 +8,11 @@ Steps:
   chrissy::patch-apply-signal POST /patches/{id}/mark-applied → verify S3 moses_revalidate signal
   chrissy::certification      GET /certification
   chrissy::logout             POST /logout → assert /login
+
+Human mode (--human flag):
+  Login is automated (infrastructure). For every other step the control page
+  shows guidance, waits for the human to click 'Done' or 'Skip', then runs
+  the same assertions that the automated flow would run.
 """
 from __future__ import annotations
 
@@ -28,6 +33,34 @@ CHRISSY_STEPS = [
     "certification",
     "logout",
 ]
+
+# Human-readable guidance for each step shown in --human mode
+HUMAN_GUIDANCE: dict[str, str] = {
+    "scenarios": (
+        "Navigate to /scenarios (Scenarios in the nav). "
+        "Wait for the table or empty state to appear."
+    ),
+    "errors": (
+        "Navigate to /errors (Errors in the nav). "
+        "Wait for the page to load."
+    ),
+    "patches": (
+        "Navigate to /patches (Patches in the nav). "
+        "Wait for the patch list or empty state to render (loads via HTMX)."
+    ),
+    "patch-apply-signal": (
+        "The harness will POST mark-applied on a pending patch and verify "
+        "the S3 moses_revalidate signal. Stay on /patches."
+    ),
+    "certification": (
+        "Navigate to /certification (Certification in the nav). "
+        "Wait for the page to load."
+    ),
+    "logout": (
+        "Click the Logout button (or navigate to /logout) to end your session. "
+        "You should be redirected to /login."
+    ),
+}
 
 
 class ChrissyFlow(BaseFlow):
@@ -61,16 +94,23 @@ class ChrissyFlow(BaseFlow):
         await r.run_step(f"{pfx}certification",      self._certification,      page=p, relogin_fn=self.relogin)
         await self.capture("certification")
         await self.verify("certification")
-        await r.run_step(f"{pfx}logout",        self.logout,         max_retries=2, page=p)
+        await r.run_step(f"{pfx}logout",        self._logout_step,   max_retries=2, page=p)
 
     # ------------------------------------------------------------------
     # Step implementations
     # ------------------------------------------------------------------
 
     async def _scenarios(self) -> None:
-        await self.goto("/scenarios")
-        await self.assert_page_ok()
-        await self.wait_htmx()
+        if self.human_mode:
+            ready = await self.await_human(HUMAN_GUIDANCE["scenarios"], "chrissy::scenarios")
+            if not ready:
+                return
+        else:
+            await self.goto("/scenarios")
+            await self.assert_page_ok()
+            await self.wait_htmx()
+
+        # Assertions — run in both modes
         # Table is empty when no test_occurrences exist for this supplier — that's OK
         await self.page.wait_for_selector(
             "table, .empty-state, main, h1, h2",
@@ -78,19 +118,33 @@ class ChrissyFlow(BaseFlow):
         )
 
     async def _errors(self) -> None:
-        await self.goto("/errors")
-        await self.assert_page_ok()
-        await self.wait_htmx()
+        if self.human_mode:
+            ready = await self.await_human(HUMAN_GUIDANCE["errors"], "chrissy::errors")
+            if not ready:
+                return
+        else:
+            await self.goto("/errors")
+            await self.assert_page_ok()
+            await self.wait_htmx()
+
+        # Assertions — run in both modes
         await self.page.wait_for_selector(
             "main, h1, h2, body",
             timeout=10_000,
         )
 
     async def _patches(self) -> None:
-        await self.goto("/patches")
-        await self.assert_page_ok()
-        # Patch list renders via HTMX swap after page load — wait for networkidle first
-        await self.wait_htmx()
+        if self.human_mode:
+            ready = await self.await_human(HUMAN_GUIDANCE["patches"], "chrissy::patches")
+            if not ready:
+                return
+        else:
+            await self.goto("/patches")
+            await self.assert_page_ok()
+            # Patch list renders via HTMX swap after page load — wait for networkidle first
+            await self.wait_htmx()
+
+        # Assertions — run in both modes
         # Patch list or empty state (no patches for acme_supplier yet is valid)
         await self.page.wait_for_selector(
             "table, .empty-state, main, h1, h2",
@@ -111,6 +165,11 @@ class ChrissyFlow(BaseFlow):
         """
         if self._verifier is None:
             return  # --verify not active; skip entirely
+
+        if self.human_mode:
+            ready = await self.await_human(HUMAN_GUIDANCE["patch-apply-signal"], "chrissy::patch-apply-signal")
+            if not ready:
+                return
 
         # Pre-step: reset SIG-TEST-01 patch to applied=FALSE for idempotent re-runs
         try:
@@ -163,10 +222,27 @@ class ChrissyFlow(BaseFlow):
         await self._verifier.verify_signals_patch_applied(ts, patch_id, response)
 
     async def _certification(self) -> None:
-        await self.goto("/certification")
-        await self.assert_page_ok()
-        await self.wait_htmx()
+        if self.human_mode:
+            ready = await self.await_human(HUMAN_GUIDANCE["certification"], "chrissy::certification")
+            if not ready:
+                return
+        else:
+            await self.goto("/certification")
+            await self.assert_page_ok()
+            await self.wait_htmx()
+
+        # Assertions — run in both modes
         await self.page.wait_for_selector(
             "main, h1, h2, body",
             timeout=10_000,
         )
+
+    async def _logout_step(self) -> None:
+        if self.human_mode:
+            ready = await self.await_human(HUMAN_GUIDANCE["logout"], "chrissy::logout")
+            if not ready:
+                return
+            # Human performed logout; assert we are now on /login
+            await self.page.wait_for_url("**/login**", timeout=10_000)
+        else:
+            await self.logout()

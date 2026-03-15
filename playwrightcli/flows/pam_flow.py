@@ -11,6 +11,11 @@ Steps:
   pam::jwt-revocation      Logout → access blocked → new login succeeds (Step #6)
   pam::monica-memory       GET /monica-memory
   pam::logout              POST /logout → assert redirect to /login
+
+Human mode (--human flag):
+  Login is automated (infrastructure). For every other step the control page
+  shows guidance, waits for the human to click 'Done' or 'Skip', then runs
+  the same assertions that the automated flow would run.
 """
 from __future__ import annotations
 
@@ -36,6 +41,46 @@ PAM_STEPS = [
     "monica-memory",
     "logout",
 ]
+
+# Human-readable guidance for each step shown in --human mode
+HUMAN_GUIDANCE: dict[str, str] = {
+    "retailers": (
+        "Navigate to /retailers (Retailers in the nav). "
+        "Wait for the retailer table or empty state to appear."
+    ),
+    "suppliers": (
+        "Navigate to /suppliers (Suppliers in the nav). "
+        "Wait for the supplier table or empty state to appear."
+    ),
+    "hitl-queue": (
+        "Navigate to /hitl-queue (HITL Queue in the nav). "
+        "Wait for the queue list to appear."
+    ),
+    "hitl-approve-signal": (
+        "The harness will POST approve on the signal-test HITL item and verify "
+        "the S3 kelly_approved signal. Stay on /hitl-queue."
+    ),
+    "gate-enforcement": (
+        "The harness will POST illegal and legal gate transitions and verify "
+        "INV-03 enforcement (409 on illegal, 200 on legal). No manual action needed."
+    ),
+    "password-reset": (
+        "The harness will run the full forgot→token→reset→login→restore cycle "
+        "using the pw_reset_test user. No manual action needed."
+    ),
+    "jwt-revocation": (
+        "The harness will test JWT revocation: logout → access blocked → new login. "
+        "No manual action needed."
+    ),
+    "monica-memory": (
+        "Navigate to /monica-memory (Monica Memory in the nav). "
+        "Wait for the page to load."
+    ),
+    "logout": (
+        "Click the Logout button (or navigate to /logout) to end your session. "
+        "You should be redirected to /login."
+    ),
+}
 
 
 class PamFlow(BaseFlow):
@@ -73,35 +118,55 @@ class PamFlow(BaseFlow):
         await r.run_step(f"{pfx}monica-memory",      self._monica_memory,       page=p, relogin_fn=self.relogin)
         await self.capture("monica-memory")
         await self.verify("monica-memory")
-        await r.run_step(f"{pfx}logout",       self.logout,         max_retries=2, page=p)
+        await r.run_step(f"{pfx}logout",       self._logout_step,   max_retries=2, page=p)
 
     # ------------------------------------------------------------------
     # Step implementations
     # ------------------------------------------------------------------
 
     async def _retailers(self) -> None:
-        await self.goto("/retailers")
-        await self.assert_page_ok()
-        await self.wait_htmx()
-        # Expect the page to contain a table or empty-state element
+        if self.human_mode:
+            ready = await self.await_human(HUMAN_GUIDANCE["retailers"], "pam::retailers")
+            if not ready:
+                return
+        else:
+            await self.goto("/retailers")
+            await self.assert_page_ok()
+            await self.wait_htmx()
+
+        # Assertions — run in both modes
         await self.page.wait_for_selector(
             "table, .empty-state, main, h1, h2",
             timeout=10_000,
         )
 
     async def _suppliers(self) -> None:
-        await self.goto("/suppliers")
-        await self.assert_page_ok()
-        await self.wait_htmx()
+        if self.human_mode:
+            ready = await self.await_human(HUMAN_GUIDANCE["suppliers"], "pam::suppliers")
+            if not ready:
+                return
+        else:
+            await self.goto("/suppliers")
+            await self.assert_page_ok()
+            await self.wait_htmx()
+
+        # Assertions — run in both modes
         await self.page.wait_for_selector(
             "table, .empty-state, main, h1, h2",
             timeout=10_000,
         )
 
     async def _hitl_queue(self) -> None:
-        await self.goto("/hitl-queue")
-        await self.assert_page_ok()
-        await self.wait_htmx()
+        if self.human_mode:
+            ready = await self.await_human(HUMAN_GUIDANCE["hitl-queue"], "pam::hitl-queue")
+            if not ready:
+                return
+        else:
+            await self.goto("/hitl-queue")
+            await self.assert_page_ok()
+            await self.wait_htmx()
+
+        # Assertions — run in both modes
         # The #hitl-table element is NOT rendered when the queue is empty (known from memory).
         # Assert any page structure is present instead.
         await self.page.wait_for_selector(
@@ -121,6 +186,11 @@ class PamFlow(BaseFlow):
         """
         if self._verifier is None:
             return  # --verify not active; skip entirely
+
+        if self.human_mode:
+            ready = await self.await_human(HUMAN_GUIDANCE["hitl-approve-signal"], "pam::hitl-approve-signal")
+            if not ready:
+                return
 
         await self.goto("/hitl-queue")
         await self.assert_page_ok()
@@ -157,6 +227,11 @@ class PamFlow(BaseFlow):
         """
         if self._verifier is None:
             return  # --verify not active; skip entirely
+
+        if self.human_mode:
+            ready = await self.await_human(HUMAN_GUIDANCE["gate-enforcement"], "pam::gate-enforcement")
+            if not ready:
+                return
 
         # inv03_bad: gate_1=PENDING — gate_2/complete is always illegal (409).
         # This supplier's state never changes so the test is fully idempotent.
@@ -207,6 +282,11 @@ class PamFlow(BaseFlow):
         """
         if self._verifier is None:
             return
+
+        if self.human_mode:
+            ready = await self.await_human(HUMAN_GUIDANCE["password-reset"], "pam::password-reset")
+            if not ready:
+                return
 
         from playwrightcli.fixtures.token_fetcher import TokenFetcher
 
@@ -293,6 +373,11 @@ class PamFlow(BaseFlow):
         if self._verifier is None:
             return
 
+        if self.human_mode:
+            ready = await self.await_human(HUMAN_GUIDANCE["jwt-revocation"], "pam::jwt-revocation")
+            if not ready:
+                return
+
         # --- JWT-REV-01: POST /logout → redirect to /login ---
         await self.goto("/suppliers")   # confirm we're authenticated first
         await self.page.evaluate("""() => {
@@ -328,10 +413,27 @@ class PamFlow(BaseFlow):
         )
 
     async def _monica_memory(self) -> None:
-        await self.goto("/monica-memory")
-        await self.assert_page_ok()
-        await self.wait_htmx()
+        if self.human_mode:
+            ready = await self.await_human(HUMAN_GUIDANCE["monica-memory"], "pam::monica-memory")
+            if not ready:
+                return
+        else:
+            await self.goto("/monica-memory")
+            await self.assert_page_ok()
+            await self.wait_htmx()
+
+        # Assertions — run in both modes
         await self.page.wait_for_selector(
             "table, .empty-state, main, h1, h2",
             timeout=10_000,
         )
+
+    async def _logout_step(self) -> None:
+        if self.human_mode:
+            ready = await self.await_human(HUMAN_GUIDANCE["logout"], "pam::logout")
+            if not ready:
+                return
+            # Human performed logout; assert we are now on /login
+            await self.page.wait_for_url("**/login**", timeout=10_000)
+        else:
+            await self.logout()
