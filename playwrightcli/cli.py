@@ -14,7 +14,11 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import os
+import signal
+import subprocess
 import sys
+import time
 import urllib.error
 import urllib.request
 from datetime import datetime
@@ -22,6 +26,110 @@ from datetime import datetime
 from playwrightcli.config import PORTALS, TIMEOUTS
 from playwrightcli.memory_manager import MemoryManager
 from playwrightcli.runner import StepRunner
+
+# ------------------------------------------------------------------
+# Server lifecycle — stop / start / restart portal uvicorn processes
+# ------------------------------------------------------------------
+
+_SERVER_PROCS: list[subprocess.Popen] = []
+
+_SERVER_DEFS = [
+    {"name": "pam",      "module": "portals.pam:app",      "port": 8000},
+    {"name": "meredith", "module": "portals.meredith:app",  "port": 8001},
+    {"name": "chrissy",  "module": "portals.chrissy:app",   "port": 8002},
+]
+
+
+def _kill_port(port: int) -> None:
+    """Kill any process listening on *port* (best-effort, Windows + Unix)."""
+    if sys.platform == "win32":
+        # netstat → find PID → taskkill
+        try:
+            out = subprocess.check_output(
+                f'netstat -ano | findstr "LISTENING" | findstr ":{port} "',
+                shell=True, text=True, stderr=subprocess.DEVNULL,
+            )
+            for line in out.strip().splitlines():
+                pid = line.strip().split()[-1]
+                if pid.isdigit():
+                    subprocess.call(f"taskkill /F /PID {pid}",
+                                    shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except subprocess.CalledProcessError:
+            pass  # nothing listening — fine
+    else:
+        # Unix: fuser or lsof
+        try:
+            subprocess.call(f"fuser -k {port}/tcp",
+                            shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            pass
+
+
+def _stop_servers() -> None:
+    """Terminate any previously-started server processes AND kill stale listeners."""
+    for proc in _SERVER_PROCS:
+        try:
+            proc.terminate()
+            proc.wait(timeout=5)
+        except Exception:
+            proc.kill()
+    _SERVER_PROCS.clear()
+
+    for sdef in _SERVER_DEFS:
+        _kill_port(sdef["port"])
+
+
+def _start_servers() -> bool:
+    """Start uvicorn for each portal. Returns True if all respond to /health."""
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    log_dir = os.path.join(project_root, "playwrightcli", "logs")
+    os.makedirs(log_dir, exist_ok=True)
+
+    for sdef in _SERVER_DEFS:
+        _kill_port(sdef["port"])
+
+    time.sleep(1)  # let ports release
+
+    for sdef in _SERVER_DEFS:
+        log_path = os.path.join(log_dir, f"{sdef['name']}.log")
+        log_fh = open(log_path, "w")
+        proc = subprocess.Popen(
+            [sys.executable, "-m", "uvicorn", sdef["module"],
+             "--host", "127.0.0.1", "--port", str(sdef["port"])],
+            cwd=project_root,
+            stdout=log_fh,
+            stderr=subprocess.STDOUT,
+        )
+        _SERVER_PROCS.append(proc)
+        print(f"  START {sdef['name']:10s} pid={proc.pid} port={sdef['port']}  log={log_path}")
+
+    # Wait for /health on each (30 s per server)
+    for sdef in _SERVER_DEFS:
+        url = f"http://localhost:{sdef['port']}/health"
+        deadline = time.time() + 30
+        ready = False
+        while time.time() < deadline:
+            try:
+                with urllib.request.urlopen(url, timeout=2) as resp:
+                    if resp.status == 200:
+                        print(f"  READY {sdef['name']:10s}")
+                        ready = True
+                        break
+            except Exception:
+                time.sleep(0.5)
+        if not ready:
+            log_path = os.path.join(log_dir, f"{sdef['name']}.log")
+            print(f"  FAIL  {sdef['name']:10s} did not respond within 30 s")
+            try:
+                with open(log_path) as f:
+                    print(f"  --- {sdef['name']} log (last 10 lines) ---")
+                    lines = f.readlines()
+                    for ln in lines[-10:]:
+                        print(f"    {ln.rstrip()}")
+            except Exception:
+                pass
+            return False
+    return True
 
 
 # ------------------------------------------------------------------
@@ -33,7 +141,7 @@ def _preflight(portal_names: list[str]) -> bool:
     all_ok = True
     for name in portal_names:
         if name in ("scope", "rbac", "lifecycle-wizard", "layer2-wizard", "wizard-session", "health",
-                    "onboarding", "exception", "template", "gate-model", "visual"):
+                    "onboarding", "exception", "template", "gate-model", "visual", "css-depr"):
             continue  # standalone flows check portals already covered by pam/meredith/chrissy
         url = PORTALS[name]["url"] + "/health"
         try:
@@ -470,14 +578,21 @@ def main() -> None:
     print(f"Verifier    : {'ACTIVE — DOM-based requirements checks' if args.verify else 'off'}")
     print()
 
+    # ---- stop stale servers, start fresh ones ----
+    print("Server lifecycle:")
+    _stop_servers()
+    if not _start_servers():
+        print("\nERROR: Failed to start portal servers.")
+        _stop_servers()
+        sys.exit(1)
+    print()
+
     print("Pre-flight check:")
     if not _preflight(portal_names):
         print(
-            "\nERROR: One or more portals are unreachable. Start them first:\n"
-            "  uvicorn portals.pam:app --port 8000\n"
-            "  uvicorn portals.meredith:app --port 8001\n"
-            "  uvicorn portals.chrissy:app --port 8002"
+            "\nERROR: One or more portals are unreachable after server start."
         )
+        _stop_servers()
         sys.exit(1)
     print()
 
@@ -523,6 +638,9 @@ def main() -> None:
     finally:
         if args.human:
             stop_server()
+        # Always tear down portal servers we started
+        print("\nStopping portal servers...")
+        _stop_servers()
 
     # Flush failures to feedback.md
     runner.write_feedback(mm)
