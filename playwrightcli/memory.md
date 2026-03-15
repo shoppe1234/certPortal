@@ -33,3 +33,127 @@
   Correction: Tried: networkidle
 - onboarding::onb-20-step6-production-ids-gate3-pending: Failed after 3 retries
   Correction: Tried: networkidle
+- template::tpl-05-save-draft: Failed after 3 retries
+  Correction: Tried: networkidle
+- template::tpl-06-publish-template: Failed after 3 retries
+  Correction: Tried: networkidle
+- exception::exc-06-confirm-pending-status: Failed after 3 retries
+  Correction: Tried: networkidle
+- onboarding::onb-05-step1-gate-a-set: Failed after 3 retries
+  Correction: Tried: networkidle
+- onboarding::onb-06-step2-fill-contact-name: Failed after 3 retries
+  Correction: Tried: networkidle
+- onboarding::onb-07-step2-fill-contact-email: Failed after 3 retries
+  Correction: Tried: networkidle
+- onboarding::onb-08-step2-fill-contact-phone: Failed after 3 retries
+  Correction: Tried: networkidle
+- onboarding::onb-09-step2-fill-contact-role: Failed after 3 retries
+  Correction: Tried: networkidle
+- onboarding::onb-10-step2-gate-b-set: Failed after 3 retries
+  Correction: Tried: networkidle
+- onboarding::onb-11-step3-select-connection-method: Failed after 3 retries
+  Correction: Tried: networkidle
+- onboarding::onb-16-step4-items-complete: Failed after 3 retries
+  Correction: Tried: networkidle
+- exception::exc-11-verify-approved-status: Failed after 3 retries
+  Correction: Tried: networkidle
+- exception::exc-07-retailer-login: Failed after 3 retries
+  Correction: Tried: networkidle
+- exception::exc-08-navigate-exception-queue: Failed after 3 retries
+  Correction: Tried: networkidle
+- exception::exc-09-verify-request-visible: Failed after 3 retries
+  Correction: Tried: networkidle
+- exception::exc-10-approve-exception: Failed after 3 retries
+  Correction: Tried: networkidle
+- template::tpl-01-admin-login: Failed after 3 retries
+  Correction: Tried: networkidle
+- template::tpl-02-navigate-templates-new: Failed after 3 retries
+  Correction: Tried: networkidle
+- template::tpl-03-fill-template-name: Failed after 3 retries
+  Correction: Tried: networkidle
+- template::tpl-04-fill-template-body: Failed after 3 retries
+  Correction: Tried: networkidle
+- template::tpl-07-retailer-login: Failed after 3 retries
+  Correction: Tried: networkidle
+- template::tpl-08-verify-template-visible: Failed after 3 retries
+  Correction: Tried: networkidle
+- template::tpl-09-adopt-template: Failed after 3 retries
+  Correction: Tried: networkidle
+- template::tpl-10-fork-template: Failed after 3 retries
+  Correction: Tried: networkidle
+- visual::vis-01-pam-dashboard-screenshot: Failed after 3 retries
+  Correction: Tried: networkidle
+- visual::vis-02-meredith-wizard-screenshot: Failed after 3 retries
+  Correction: Tried: networkidle
+- visual::vis-03-chrissy-onboarding-screenshot: Failed after 3 retries
+  Correction: Tried: networkidle
+- visual::vis-04-responsive-mobile-viewport: Failed after 3 retries
+  Correction: Tried: networkidle
+- visual::vis-05-dark-mode-toggle: Failed after 3 retries
+  Correction: Tried: networkidle
+- onboarding::onb-03-step1-spec-download-visible: Failed after 3 retries
+  Correction: Tried: networkidle
+- onboarding::onb-04-step1-acknowledge: Failed after 3 retries
+  Correction: Tried: networkidle
+- onboarding::onb-15-step4-fill-item-data: Failed after 3 retries
+  Correction: Tried: networkidle
+- exception::exc-12-verify-kelly-signal: Failed after 3 retries
+  Correction: Tried: networkidle
+- exception::exc-01-supplier-login: Failed after 3 retries
+  Correction: Tried: networkidle
+- exception::exc-02-navigate-exceptions: Failed after 3 retries
+  Correction: Tried: networkidle
+- exception::exc-03-select-reason-code: Failed after 3 retries
+  Correction: Tried: networkidle
+- exception::exc-04-fill-justification: Failed after 3 retries
+  Correction: Tried: networkidle
+- gate_model::gate-01-login-chrissy: Failed after 3 retries
+  Correction: Tried: networkidle
+- gate_model::gate-02-navigate-onboarding: Failed after 3 retries
+  Correction: Tried: networkidle
+- gate_model::gate-03-step2-locked-before-gate-a: Failed after 3 retries
+  Correction: Tried: networkidle
+- gate_model::gate-04-gate-a-binary-value: Failed after 3 retries
+  Correction: Tried: networkidle
+- gate_model::gate-05-step3-locked-before-gate-b: Failed after 3 retries
+  Correction: Tried: networkidle
+- gate_model::gate-06-gate-b-binary-value: Failed after 3 retries
+  Correction: Tried: networkidle
+- gate_model::gate-07-progress-bar-visible: Failed after 3 retries
+  Correction: Tried: networkidle
+- gate_model::gate-08-progress-bar-reflects-status: Failed after 3 retries
+  Correction: Tried: networkidle
+- css-depr::css-depr-01-pam-login-loads-core: Failed after 3 retries
+  Correction: Tried: networkidle
+- css-depr::css-depr-02-pam-login-no-inline: Failed after 3 retries
+  Correction: Tried: networkidle
+- css-depr::css-depr-03-meredith-login-loads-core: Failed after 3 retries
+  Correction: Tried: networkidle
+- css-depr::css-depr-04-meredith-login-no-inline: Failed after 3 retries
+  Correction: Tried: networkidle
+- css-depr::css-depr-05-chrissy-login-loads-core: Failed after 3 retries
+  Correction: Tried: networkidle
+- css-depr::css-depr-06-chrissy-login-no-inline: Failed after 3 retries
+  Correction: Tried: networkidle
+- css-depr::css-depr-07-pam-forgot-no-inline: Failed after 3 retries
+  Correction: Tried: networkidle
+- css-depr::css-depr-08-design-tokens-active: Failed after 3 retries
+  Correction: Tried: networkidle
+- css-depr::css-depr-09-pam-dark-mode: Failed after 3 retries
+  Correction: Tried: networkidle
+- scope::supplier-a-scenarios: Failed after 3 retries
+  Correction: Tried: networkidle
+- scope::supplier-b-patches: Failed after 3 retries
+  Correction: Tried: networkidle
+- scope::supplier-b-scenarios: Failed after 3 retries
+  Correction: Tried: networkidle
+- scope::retailer-a-status: Failed after 3 retries
+  Correction: Tried: networkidle
+- scope::retailer-b-status: Failed after 3 retries
+  Correction: Tried: networkidle
+- pam::jwt-revocation: Failed on attempt 1; resolved after correction=networkidle
+  Correction: networkidle
+  Status: RESOLVED — correction succeeded
+- meredith::login: Failed on attempt 1; resolved after correction=networkidle
+  Correction: networkidle
+  Status: RESOLVED — correction succeeded

@@ -7,6 +7,8 @@ Requirements verified: ONB-01 through ONB-20.
 """
 from __future__ import annotations
 
+import os
+
 from playwrightcli.config import PORTALS, TIMEOUTS
 
 PORTAL = "onboarding"
@@ -47,7 +49,29 @@ class OnboardingFlow:
         self.runner = runner
         self._verifier = verifier
 
+    def _reset_test_state(self) -> None:
+        """Reset acme's onboarding state so the flow is idempotent."""
+        import psycopg2
+        from playwrightcli.fixtures.signal_checker import _load_dotenv
+        env = _load_dotenv()
+        db_url = os.environ.get("CERTPORTAL_DB_URL") or env.get("CERTPORTAL_DB_URL")
+        conn = psycopg2.connect(db_url)
+        try:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    UPDATE hitl_gate_status
+                    SET gate_a = 'PENDING', gate_b = 'PENDING',
+                        gate_1 = 'PENDING', gate_2 = 'PENDING', gate_3 = 'PENDING',
+                        last_updated_by = 'playwright_reset'
+                    WHERE supplier_id = 'acme'
+                """)
+                cur.execute("DELETE FROM supplier_onboarding WHERE supplier_slug = 'acme'")
+            conn.commit()
+        finally:
+            conn.close()
+
     async def run(self) -> None:
+        self._reset_test_state()
         r = self.runner
         await r.run_step("onboarding::onb-01-login-chrissy",            self._login_chrissy,         page=self.page)
         await r.run_step("onboarding::onb-02-navigate-onboarding",      self._navigate_onboarding,   page=self.page)

@@ -200,6 +200,9 @@ class CssDeprecationFlow:
             "getComputedStyle(document.body).backgroundColor"
         )
 
+        # Restore light mode before verifier runs
+        await self.page.evaluate('document.documentElement.setAttribute("data-theme", "light")')
+
         if light_bg == dark_bg:
             raise AssertionError(
                 f"PAM login dark mode not working: light={light_bg}, dark={dark_bg}"

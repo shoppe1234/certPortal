@@ -8,6 +8,8 @@ Requirements verified: EXC-01 through EXC-12.
 """
 from __future__ import annotations
 
+import os
+
 from playwrightcli.config import PORTALS, TIMEOUTS
 
 PORTAL = "exception"
@@ -44,7 +46,24 @@ class ExceptionFlow:
         self.runner = runner
         self._verifier = verifier
 
+    def _reset_test_state(self) -> None:
+        """Delete stale exception_requests for acme/lowes so the flow is idempotent."""
+        import psycopg2
+        from playwrightcli.fixtures.signal_checker import _load_dotenv
+        env = _load_dotenv()
+        db_url = os.environ.get("CERTPORTAL_DB_URL") or env.get("CERTPORTAL_DB_URL")
+        conn = psycopg2.connect(db_url)
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "DELETE FROM exception_requests WHERE supplier_slug = 'acme' AND retailer_slug = 'lowes'"
+                )
+            conn.commit()
+        finally:
+            conn.close()
+
     async def run(self) -> None:
+        self._reset_test_state()
         r = self.runner
         # Supplier side
         await r.run_step("exception::exc-01-supplier-login",         self._supplier_login,          page=self.page)

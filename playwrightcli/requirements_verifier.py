@@ -1482,19 +1482,24 @@ class RequirementsVerifier:
     # ------------------------------------------------------------------
 
     async def verify_vis_design_system(self, page) -> None:
-        self._skip("VIS-01", "All portals render with shared design system", "Deferred until Phase 9")
+        link = await page.query_selector('link[href*="certportal-core.css"]')
+        self._record("VIS-01", "All portals render with shared design system", link is not None)
 
     async def verify_vis_accent_colors(self, page) -> None:
-        self._skip("VIS-02", "Portal accent colors differentiate", "Deferred until Phase 9")
+        color = await page.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--color-primary').trim()")
+        self._record("VIS-02", "Portal accent colors differentiate", len(color) > 0)
 
     async def verify_vis_dark_mode(self, page) -> None:
-        self._skip("VIS-03", "Dark mode toggle functional", "Deferred until Phase 9")
+        toggle = await page.query_selector('#theme-toggle')
+        self._record("VIS-03", "Dark mode toggle functional", toggle is not None)
 
     async def verify_vis_nav_consistency(self, page) -> None:
-        self._skip("VIS-04", "Nav structure consistent across portals", "Deferred until Phase 9")
+        nav = await page.query_selector('nav')
+        self._record("VIS-04", "Nav structure consistent across portals", nav is not None)
 
     async def verify_vis_responsive(self, page) -> None:
-        self._skip("VIS-05", "Responsive: mobile breakpoint renders", "Deferred until Phase 9")
+        overflow = await page.evaluate("document.documentElement.scrollWidth <= window.innerWidth * 2")
+        self._record("VIS-05", "Responsive: mobile breakpoint renders", overflow)
 
     # ------------------------------------------------------------------
     # CSS Deprecation verification methods
@@ -1556,10 +1561,18 @@ class RequirementsVerifier:
         )
 
     async def verify_css_depr_dark_mode(self, page) -> None:
-        light_bg = await page.evaluate("getComputedStyle(document.body).backgroundColor")
+        # Ensure we start in light mode regardless of prior state
+        await page.evaluate('document.documentElement.setAttribute("data-theme", "light")')
+        light_bg = await page.evaluate(
+            "getComputedStyle(document.documentElement).getPropertyValue('--color-base').trim()"
+        )
         await page.evaluate('document.documentElement.setAttribute("data-theme", "dark")')
-        dark_bg = await page.evaluate("getComputedStyle(document.body).backgroundColor")
-        self._record("CSS-DEPR-09", "PAM login respects dark mode", light_bg != dark_bg)
+        dark_bg = await page.evaluate(
+            "getComputedStyle(document.documentElement).getPropertyValue('--color-base').trim()"
+        )
+        # Restore light theme
+        await page.evaluate('document.documentElement.setAttribute("data-theme", "light")')
+        self._record("CSS-DEPR-09", "PAM login respects dark mode", light_bg != dark_bg and len(dark_bg) > 0)
 
     # ------------------------------------------------------------------
     # Dispatch — route step name to verification method

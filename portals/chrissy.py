@@ -129,7 +129,7 @@ async def health():
 async def login_page(request: Request, error: str = ""):
     error_html = f'<p class="auth-err">{error}</p>' if error else ""
     return HTMLResponse(f"""<!doctype html>
-<html lang="en">
+<html lang="en" data-theme="light">
 <head>
   <meta charset="utf-8">
   <title>certPortal Supplier — Login</title>
@@ -252,7 +252,7 @@ async def forgot_password_form(error: str = ""):
     """Render the forgot-password form (username field, supplier theme)."""
     err_html = f'<p class="auth-err">{error}</p>' if error else ""
     return HTMLResponse(f"""<!doctype html>
-<html lang="en"><head><meta charset="utf-8">
+<html lang="en" data-theme="light"><head><meta charset="utf-8">
 <title>certPortal Supplier - Forgot Password</title>
 {_CHRISSY_AUTH_HEAD}</head>
 <body class="auth-body"><div class="auth-card">
@@ -297,7 +297,7 @@ async def reset_password_form(token: str, error: str = ""):
         return RedirectResponse(url="/forgot-password?error=Reset+link+is+invalid+or+expired", status_code=302)
     err_html = f'<p class="auth-err">{error}</p>' if error else ""
     return HTMLResponse(f"""<!doctype html>
-<html lang="en"><head><meta charset="utf-8">
+<html lang="en" data-theme="light"><head><meta charset="utf-8">
 <title>certPortal Supplier - Reset Password</title>
 {_CHRISSY_AUTH_HEAD}</head>
 <body class="auth-body"><div class="auth-card">
@@ -699,7 +699,7 @@ async def change_password_page(
     msg_html = f'<p class="auth-msg">{msg}</p>' if msg else ""
     username = user.get("sub", "")
     return HTMLResponse(f"""<!doctype html>
-<html lang="en"><head><meta charset="utf-8">
+<html lang="en" data-theme="light"><head><meta charset="utf-8">
 <title>certPortal Supplier — Change Password</title>
 {_CHRISSY_AUTH_HEAD}</head>
 <body class="auth-body"><div class="auth-card auth-card--wide">

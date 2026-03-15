@@ -120,6 +120,25 @@ class SignalChecker:
         except Exception:
             return None
 
+    def find_signal(self, signal_type: str, retries: int = 3, delay: float = 2.0) -> dict[str, Any] | None:
+        """Find the most recent signal file matching *signal_type* prefix.
+
+        Searches under common signal prefixes with retry logic for eventual
+        consistency. Returns the parsed JSON payload, or None if not found.
+        """
+        import time
+        since = time.time() - 3600  # look back 1 hour
+        scopes = ("lowes/system/signals/", "lowes/acme/signals/")
+        for attempt in range(retries):
+            for scope in scopes:
+                hits = self.list_signals_since(f"{scope}{signal_type}", since)
+                if hits:
+                    latest = sorted(hits, key=lambda o: o["LastModified"], reverse=True)[0]
+                    return self.get_object_json(latest["Key"])
+            if attempt < retries - 1:
+                time.sleep(delay)
+        return None
+
     @property
     def bucket(self) -> str:
         return self._bucket
