@@ -125,35 +125,26 @@ async def health():
 
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request, error: str = ""):
-    error_html = f'<p style="color:#ff4455;margin-bottom:1rem">{error}</p>' if error else ""
+    error_html = f'<p class="auth-err">{error}</p>' if error else ""
     return HTMLResponse(f"""<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <title>certPortal Admin — Login</title>
-  <style>
-    body{{font-family:monospace;background:#0a0e1a;color:#c9d1d9;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}}
-    .card{{background:#1e2d40;padding:2.5rem;border-radius:8px;width:340px;box-shadow:0 4px 24px rgba(0,0,0,.4)}}
-    h1{{color:#00ff88;font-size:1.4rem;margin:0 0 1.5rem}}
-    label{{display:block;font-size:.8rem;color:#8b949e;margin-bottom:.3rem}}
-    input{{width:100%;box-sizing:border-box;padding:.6rem;background:#0a0e1a;border:1px solid #30363d;border-radius:4px;color:#c9d1d9;font-family:monospace;font-size:.9rem}}
-    button{{width:100%;margin-top:1.2rem;padding:.75rem;background:#00ff88;color:#0a0e1a;border:none;border-radius:4px;font-weight:700;font-size:1rem;cursor:pointer;font-family:monospace}}
-    .sep{{margin-bottom:1rem}}
-    .forgot{{margin-top:.8rem;text-align:right;font-size:.78rem}}
-    .forgot a{{color:#6a8aa8;text-decoration:none}}
-    .forgot a:hover{{color:#00ff88}}
-  </style>
+  <link rel="stylesheet" href="/static/css/certportal-core.css">
+  <link rel="stylesheet" href="/static/css/portal-pam.css">
+  <link rel="stylesheet" href="/static/css/auth-standalone.css">
 </head>
-<body>
-<div class="card">
-  <h1>certPortal · Admin</h1>
+<body class="auth-body">
+<div class="auth-card">
+  <h1 class="auth-title">certPortal · Admin</h1>
   {error_html}
   <form method="post" action="/token">
-    <div class="sep"><label>Username</label><input name="username" autocomplete="username" required></div>
-    <div class="sep"><label>Password</label><input name="password" type="password" autocomplete="current-password" required></div>
-    <button type="submit">Sign in</button>
+    <div class="auth-sep"><label class="auth-label">Username</label><input class="auth-input" name="username" autocomplete="username" required></div>
+    <div class="auth-sep"><label class="auth-label">Password</label><input class="auth-input" name="password" type="password" autocomplete="current-password" required></div>
+    <button class="auth-btn" type="submit">Sign in</button>
   </form>
-  <p class="forgot"><a href="/forgot-password">Forgot password?</a></p>
+  <p class="auth-forgot"><a href="/forgot-password">Forgot password?</a></p>
 </div>
 </body>
 </html>""")
@@ -247,46 +238,33 @@ async def logout(access_token: str | None = Cookie(default=None)):
 # Open endpoints: Password reset (ADR-023)
 # ---------------------------------------------------------------------------
 
-_PAM_RESET_CSS = (
-    "body{font-family:monospace;background:#0a0e1a;color:#c9d1d9;display:flex;"
-    "align-items:center;justify-content:center;min-height:100vh;margin:0}"
-    ".card{background:#1e2d40;padding:2.5rem;border-radius:8px;width:380px;"
-    "box-shadow:0 4px 24px rgba(0,0,0,.4)}"
-    "h1{color:#00ff88;font-size:1.3rem;margin:0 0 1.5rem}"
-    "label{display:block;font-size:.8rem;color:#8b949e;margin-bottom:.3rem}"
-    "input{width:100%;box-sizing:border-box;padding:.6rem;background:#0a0e1a;"
-    "border:1px solid #30363d;border-radius:4px;color:#c9d1d9;font-family:monospace;"
-    "font-size:.9rem;margin-bottom:.9rem}"
-    "button{width:100%;margin-top:.2rem;padding:.75rem;background:#00ff88;color:#0a0e1a;"
-    "border:none;border-radius:4px;font-weight:700;font-size:.95rem;cursor:pointer;"
-    "font-family:monospace}"
-    ".msg{color:#00ff88;margin-bottom:1rem;font-size:.9rem}"
-    ".err{color:#ff4455;margin-bottom:1rem;font-size:.9rem}"
-    ".back{margin-top:1rem;font-size:.82rem}"
-    ".back a{color:#6a8aa8;text-decoration:none}"
+_PAM_AUTH_HEAD = (
+    '  <link rel="stylesheet" href="/static/css/certportal-core.css">\n'
+    '  <link rel="stylesheet" href="/static/css/portal-pam.css">\n'
+    '  <link rel="stylesheet" href="/static/css/auth-standalone.css">'
 )
 
 
 @app.get("/forgot-password", response_class=HTMLResponse)
 async def forgot_password_form(error: str = ""):
     """Render the forgot-password form (username field)."""
-    err_html = f'<p class="err">{error}</p>' if error else ""
+    err_html = f'<p class="auth-err">{error}</p>' if error else ""
     return HTMLResponse(f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <title>certPortal Admin — Forgot Password</title>
-<style>{_PAM_RESET_CSS}</style></head>
-<body><div class="card">
-  <h1>certPortal &middot; Forgot Password</h1>
+{_PAM_AUTH_HEAD}</head>
+<body class="auth-body"><div class="auth-card">
+  <h1 class="auth-title">certPortal &middot; Forgot Password</h1>
   {err_html}
-  <p style="color:#8b949e;font-size:.85rem;margin-bottom:1.2rem">
+  <p class="auth-subtitle">
     Enter your username and we will email a reset link if an address is on file.
   </p>
   <form method="post" action="/forgot-password">
-    <label>Username</label>
-    <input name="username" autocomplete="username" required>
-    <button type="submit">Send Reset Link</button>
+    <label class="auth-label">Username</label>
+    <input class="auth-input" name="username" autocomplete="username" required>
+    <button class="auth-btn" type="submit">Send Reset Link</button>
   </form>
-  <p class="back"><a href="/login">&#8592; Back to login</a></p>
+  <p class="auth-back"><a href="/login">&#8592; Back to login</a></p>
 </div></body></html>""")
 
 
@@ -315,21 +293,21 @@ async def reset_password_form(token: str, error: str = ""):
     )
     if row is None:
         return RedirectResponse(url="/forgot-password?error=Reset+link+is+invalid+or+expired", status_code=302)
-    err_html = f'<p class="err">{error}</p>' if error else ""
+    err_html = f'<p class="auth-err">{error}</p>' if error else ""
     return HTMLResponse(f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <title>certPortal Admin — Reset Password</title>
-<style>{_PAM_RESET_CSS}</style></head>
-<body><div class="card">
-  <h1>certPortal &middot; Reset Password</h1>
+{_PAM_AUTH_HEAD}</head>
+<body class="auth-body"><div class="auth-card">
+  <h1 class="auth-title">certPortal &middot; Reset Password</h1>
   {err_html}
   <form method="post" action="/reset-password">
     <input type="hidden" name="token" value="{token}">
-    <label>New Password (min 8 characters)</label>
-    <input name="new_password" type="password" autocomplete="new-password" required minlength="8">
-    <label>Confirm New Password</label>
-    <input name="confirm_password" type="password" autocomplete="new-password" required>
-    <button type="submit">Set New Password</button>
+    <label class="auth-label">New Password (min 8 characters)</label>
+    <input class="auth-input" name="new_password" type="password" autocomplete="new-password" required minlength="8">
+    <label class="auth-label">Confirm New Password</label>
+    <input class="auth-input" name="confirm_password" type="password" autocomplete="new-password" required>
+    <button class="auth-btn" type="submit">Set New Password</button>
   </form>
 </div></body></html>""")
 
@@ -627,27 +605,6 @@ async def hitl_count_partial(
 # Protected: Register new user (admin only — sits on admin router)
 # ---------------------------------------------------------------------------
 
-_PAM_CARD_CSS = """
-  body{font-family:monospace;background:#0a0e1a;color:#c9d1d9;display:flex;
-       align-items:center;justify-content:center;min-height:100vh;margin:0}
-  .card{background:#1e2d40;padding:2.5rem;border-radius:8px;width:480px;
-        box-shadow:0 4px 24px rgba(0,0,0,.4)}
-  h1{color:#00ff88;font-size:1.3rem;margin:0 0 1.5rem}
-  label{display:block;font-size:.75rem;color:#8b949e;margin-bottom:.25rem;
-        text-transform:uppercase;letter-spacing:.5px}
-  input,select{width:100%;box-sizing:border-box;padding:.55rem .7rem;
-               background:#0a0e1a;border:1px solid #30363d;border-radius:4px;
-               color:#c9d1d9;font-family:monospace;font-size:.9rem;margin-bottom:.9rem}
-  select option{background:#0a0e1a}
-  button{width:100%;margin-top:.3rem;padding:.7rem;background:#00ff88;color:#0a0e1a;
-         border:none;border-radius:4px;font-weight:700;font-size:.95rem;cursor:pointer;
-         font-family:monospace}
-  button:hover{background:#00cc6e}
-  .msg{color:#00ff88;margin-bottom:1rem;font-size:.9rem}
-  .err{color:#ff4455;margin-bottom:1rem;font-size:.9rem}
-  .back{margin-top:1rem;font-size:.82rem}
-  .back a{color:#00ff88;text-decoration:none}
-"""
 
 
 @router.get("/register", response_class=HTMLResponse)
@@ -658,36 +615,36 @@ async def register_page(
     msg: str = "",
 ):
     """Render the user registration form (admin only)."""
-    err_html = f'<p class="err">{error}</p>' if error else ""
-    msg_html = f'<p class="msg">{msg}</p>' if msg else ""
+    err_html = f'<p class="auth-err">{error}</p>' if error else ""
+    msg_html = f'<p class="auth-msg">{msg}</p>' if msg else ""
     return HTMLResponse(f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <title>certPortal Admin — Register User</title>
-<style>{_PAM_CARD_CSS}</style></head>
-<body><div class="card">
-  <h1>certPortal &middot; Register User</h1>
+{_PAM_AUTH_HEAD}</head>
+<body class="auth-body"><div class="auth-card auth-card--wide">
+  <h1 class="auth-title">certPortal &middot; Register User</h1>
   {msg_html}{err_html}
   <form method="post" action="/register">
-    <label>Username</label>
-    <input name="username" autocomplete="off" required>
-    <label>Password (min 8 characters)</label>
-    <input name="password" type="password" autocomplete="new-password" required minlength="8">
-    <label>Confirm Password</label>
-    <input name="confirm_password" type="password" autocomplete="new-password" required>
-    <label>Role</label>
-    <select name="role" required>
+    <label class="auth-label">Username</label>
+    <input class="auth-input" name="username" autocomplete="off" required>
+    <label class="auth-label">Password (min 8 characters)</label>
+    <input class="auth-input" name="password" type="password" autocomplete="new-password" required minlength="8">
+    <label class="auth-label">Confirm Password</label>
+    <input class="auth-input" name="confirm_password" type="password" autocomplete="new-password" required>
+    <label class="auth-label">Role</label>
+    <select class="auth-select" name="role" required>
       <option value="">&#8212; select role &#8212;</option>
       <option value="admin">admin</option>
       <option value="retailer">retailer</option>
       <option value="supplier">supplier</option>
     </select>
-    <label>Retailer Slug (optional)</label>
-    <input name="retailer_slug" placeholder="e.g. lowes">
-    <label>Supplier Slug (optional)</label>
-    <input name="supplier_slug" placeholder="e.g. acme">
-    <button type="submit">Register User</button>
+    <label class="auth-label">Retailer Slug (optional)</label>
+    <input class="auth-input" name="retailer_slug" placeholder="e.g. lowes">
+    <label class="auth-label">Supplier Slug (optional)</label>
+    <input class="auth-input" name="supplier_slug" placeholder="e.g. acme">
+    <button class="auth-btn" type="submit">Register User</button>
   </form>
-  <p class="back"><a href="/">&#8592; Back to Dashboard</a></p>
+  <p class="auth-back"><a href="/">&#8592; Back to Dashboard</a></p>
 </div></body></html>""")
 
 
@@ -748,27 +705,27 @@ async def change_password_page(
     msg: str = "",
 ):
     """Render the change-password form."""
-    err_html = f'<p class="err">{error}</p>' if error else ""
-    msg_html = f'<p class="msg">{msg}</p>' if msg else ""
+    err_html = f'<p class="auth-err">{error}</p>' if error else ""
+    msg_html = f'<p class="auth-msg">{msg}</p>' if msg else ""
     username = user.get("sub", "")
     return HTMLResponse(f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <title>certPortal Admin — Change Password</title>
-<style>{_PAM_CARD_CSS}</style></head>
-<body><div class="card">
-  <h1>certPortal &middot; Change Password</h1>
-  <p style="color:#6a8aa8;font-size:.85rem;margin-bottom:1.2rem">Signed in as <strong style="color:#c8d8e8">{username}</strong></p>
+{_PAM_AUTH_HEAD}</head>
+<body class="auth-body"><div class="auth-card auth-card--wide">
+  <h1 class="auth-title">certPortal &middot; Change Password</h1>
+  <p class="auth-subtitle">Signed in as <strong>{username}</strong></p>
   {msg_html}{err_html}
   <form method="post" action="/change-password">
-    <label>Current Password</label>
-    <input name="current_password" type="password" autocomplete="current-password" required>
-    <label>New Password (min 8 characters)</label>
-    <input name="new_password" type="password" autocomplete="new-password" required minlength="8">
-    <label>Confirm New Password</label>
-    <input name="confirm_password" type="password" autocomplete="new-password" required>
-    <button type="submit">Change Password</button>
+    <label class="auth-label">Current Password</label>
+    <input class="auth-input" name="current_password" type="password" autocomplete="current-password" required>
+    <label class="auth-label">New Password (min 8 characters)</label>
+    <input class="auth-input" name="new_password" type="password" autocomplete="new-password" required minlength="8">
+    <label class="auth-label">Confirm New Password</label>
+    <input class="auth-input" name="confirm_password" type="password" autocomplete="new-password" required>
+    <button class="auth-btn" type="submit">Change Password</button>
   </form>
-  <p class="back"><a href="/">&#8592; Back to Dashboard</a></p>
+  <p class="auth-back"><a href="/">&#8592; Back to Dashboard</a></p>
 </div></body></html>""")
 
 

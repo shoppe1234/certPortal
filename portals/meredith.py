@@ -143,34 +143,26 @@ async def health():
 
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request, error: str = ""):
-    error_html = f'<p style="color:#e53e3e;margin-bottom:1rem">{error}</p>' if error else ""
+    error_html = f'<p class="auth-err">{error}</p>' if error else ""
     return HTMLResponse(f"""<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <title>certPortal Retailer — Login</title>
-  <style>
-    body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f8f9fc;color:#1a1f36;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}}
-    .card{{background:#fff;padding:2.5rem;border-radius:8px;width:360px;box-shadow:0 2px 12px rgba(0,0,0,.08);border:1px solid #e8ecf5}}
-    h1{{color:#4f6ef7;font-size:1.4rem;margin:0 0 1.5rem}}
-    label{{display:block;font-size:.8rem;color:#6b7280;margin-bottom:.3rem;font-weight:500}}
-    input{{width:100%;box-sizing:border-box;padding:.6rem .75rem;background:#fff;border:1px solid #e8ecf5;border-radius:6px;color:#1a1f36;font-size:.9rem}}
-    input:focus{{outline:none;border-color:#4f6ef7;box-shadow:0 0 0 3px rgba(79,110,247,.1)}}
-    button{{width:100%;margin-top:1.2rem;padding:.75rem;background:#4f6ef7;color:#fff;border:none;border-radius:6px;font-weight:600;font-size:1rem;cursor:pointer}}
-    button:hover{{background:#3b5bd9}}
-    .sep{{margin-bottom:1rem}}
-  </style>
+  <link rel="stylesheet" href="/static/css/certportal-core.css">
+  <link rel="stylesheet" href="/static/css/portal-meredith.css">
+  <link rel="stylesheet" href="/static/css/auth-standalone.css">
 </head>
-<body>
-<div class="card">
-  <h1>certPortal · Retailer</h1>
+<body class="auth-body">
+<div class="auth-card">
+  <h1 class="auth-title">certPortal · Retailer</h1>
   {error_html}
   <form method="post" action="/token">
-    <div class="sep"><label>Username</label><input name="username" autocomplete="username" required></div>
-    <div class="sep"><label>Password</label><input name="password" type="password" autocomplete="current-password" required></div>
-    <button type="submit">Sign in</button>
+    <div class="auth-sep"><label class="auth-label">Username</label><input class="auth-input" name="username" autocomplete="username" required></div>
+    <div class="auth-sep"><label class="auth-label">Password</label><input class="auth-input" name="password" type="password" autocomplete="current-password" required></div>
+    <button class="auth-btn" type="submit">Sign in</button>
   </form>
-  <p style="margin-top:.8rem;text-align:right;font-size:.78rem"><a href="/forgot-password" style="color:#4f6ef7;text-decoration:none">Forgot password?</a></p>
+  <p class="auth-forgot"><a href="/forgot-password">Forgot password?</a></p>
 </div>
 </body>
 </html>""")
@@ -264,46 +256,33 @@ async def logout(access_token: str | None = Cookie(default=None)):
 # Open endpoints: Password reset (ADR-023)
 # ---------------------------------------------------------------------------
 
-_MEREDITH_RESET_CSS = (
-    "body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;"
-    "background:#f8f9fc;color:#1a1f36;display:flex;align-items:center;"
-    "justify-content:center;min-height:100vh;margin:0}"
-    ".card{background:#fff;padding:2.5rem;border-radius:8px;width:380px;"
-    "box-shadow:0 2px 12px rgba(0,0,0,.08);border:1px solid #e8ecf5}"
-    "h1{color:#4f6ef7;font-size:1.3rem;margin:0 0 1.5rem}"
-    "label{display:block;font-size:.8rem;color:#6b7280;margin-bottom:.25rem;font-weight:500}"
-    "input{width:100%;box-sizing:border-box;padding:.6rem .75rem;background:#fff;"
-    "border:1px solid #e8ecf5;border-radius:6px;color:#1a1f36;font-size:.9rem;"
-    "margin-bottom:.9rem}"
-    "button{width:100%;margin-top:.2rem;padding:.7rem;background:#4f6ef7;color:#fff;"
-    "border:none;border-radius:6px;font-weight:600;font-size:.95rem;cursor:pointer}"
-    "button:hover{background:#3b5bd9}"
-    ".err{color:#e53e3e;margin-bottom:1rem;font-size:.9rem}"
-    ".back{margin-top:1rem;font-size:.82rem}"
-    ".back a{color:#4f6ef7;text-decoration:none}"
+_MEREDITH_AUTH_HEAD = (
+    '  <link rel="stylesheet" href="/static/css/certportal-core.css">\n'
+    '  <link rel="stylesheet" href="/static/css/portal-meredith.css">\n'
+    '  <link rel="stylesheet" href="/static/css/auth-standalone.css">'
 )
 
 
 @app.get("/forgot-password", response_class=HTMLResponse)
 async def forgot_password_form(error: str = ""):
     """Render the forgot-password form (username field, retailer theme)."""
-    err_html = f'<p class="err">{error}</p>' if error else ""
+    err_html = f'<p class="auth-err">{error}</p>' if error else ""
     return HTMLResponse(f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <title>certPortal Retailer - Forgot Password</title>
-<style>{_MEREDITH_RESET_CSS}</style></head>
-<body><div class="card">
-  <h1>certPortal &middot; Forgot Password</h1>
+{_MEREDITH_AUTH_HEAD}</head>
+<body class="auth-body"><div class="auth-card">
+  <h1 class="auth-title">certPortal &middot; Forgot Password</h1>
   {err_html}
-  <p style="color:#6b7280;font-size:.85rem;margin-bottom:1.2rem">
+  <p class="auth-subtitle">
     Enter your username and we will email a reset link if an address is on file.
   </p>
   <form method="post" action="/forgot-password">
-    <label>Username</label>
-    <input name="username" autocomplete="username" required>
-    <button type="submit">Send Reset Link</button>
+    <label class="auth-label">Username</label>
+    <input class="auth-input" name="username" autocomplete="username" required>
+    <button class="auth-btn" type="submit">Send Reset Link</button>
   </form>
-  <p class="back"><a href="/login">&#8592; Back to login</a></p>
+  <p class="auth-back"><a href="/login">&#8592; Back to login</a></p>
 </div></body></html>""")
 
 
@@ -332,21 +311,21 @@ async def reset_password_form(token: str, error: str = ""):
     )
     if row is None:
         return RedirectResponse(url="/forgot-password?error=Reset+link+is+invalid+or+expired", status_code=302)
-    err_html = f'<p class="err">{error}</p>' if error else ""
+    err_html = f'<p class="auth-err">{error}</p>' if error else ""
     return HTMLResponse(f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <title>certPortal Retailer - Reset Password</title>
-<style>{_MEREDITH_RESET_CSS}</style></head>
-<body><div class="card">
-  <h1>certPortal &middot; Reset Password</h1>
+{_MEREDITH_AUTH_HEAD}</head>
+<body class="auth-body"><div class="auth-card">
+  <h1 class="auth-title">certPortal &middot; Reset Password</h1>
   {err_html}
   <form method="post" action="/reset-password">
     <input type="hidden" name="token" value="{token}">
-    <label>New Password (min 8 characters)</label>
-    <input name="new_password" type="password" autocomplete="new-password" required minlength="8">
-    <label>Confirm New Password</label>
-    <input name="confirm_password" type="password" autocomplete="new-password" required>
-    <button type="submit">Set New Password</button>
+    <label class="auth-label">New Password (min 8 characters)</label>
+    <input class="auth-input" name="new_password" type="password" autocomplete="new-password" required minlength="8">
+    <label class="auth-label">Confirm New Password</label>
+    <input class="auth-input" name="confirm_password" type="password" autocomplete="new-password" required>
+    <button class="auth-btn" type="submit">Set New Password</button>
   </form>
 </div></body></html>""")
 
@@ -787,26 +766,6 @@ async def retailer_approve_gate(
 # Protected: Change password (any authenticated retailer/admin user)
 # ---------------------------------------------------------------------------
 
-_MEREDITH_CARD_CSS = """
-  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
-       background:#f8f9fc;color:#1a1f36;display:flex;align-items:center;
-       justify-content:center;min-height:100vh;margin:0}
-  .card{background:#fff;padding:2.5rem;border-radius:8px;width:420px;
-        box-shadow:0 2px 12px rgba(0,0,0,.08);border:1px solid #e8ecf5}
-  h1{color:#4f6ef7;font-size:1.3rem;margin:0 0 1.5rem}
-  label{display:block;font-size:.8rem;color:#6b7280;margin-bottom:.25rem;font-weight:500}
-  input{width:100%;box-sizing:border-box;padding:.6rem .75rem;background:#fff;
-        border:1px solid #e8ecf5;border-radius:6px;color:#1a1f36;font-size:.9rem;
-        margin-bottom:.9rem}
-  input:focus{outline:none;border-color:#4f6ef7;box-shadow:0 0 0 3px rgba(79,110,247,.1)}
-  button{width:100%;margin-top:.3rem;padding:.7rem;background:#4f6ef7;color:#fff;
-         border:none;border-radius:6px;font-weight:600;font-size:.95rem;cursor:pointer}
-  button:hover{background:#3b5bd9}
-  .msg{color:#22c55e;margin-bottom:1rem;font-size:.9rem}
-  .err{color:#e53e3e;margin-bottom:1rem;font-size:.9rem}
-  .back{margin-top:1rem;font-size:.82rem}
-  .back a{color:#4f6ef7;text-decoration:none}
-"""
 
 
 @router.get("/change-password", response_class=HTMLResponse)
@@ -817,27 +776,27 @@ async def change_password_page(
     msg: str = "",
 ):
     """Render the change-password form (retailer theme)."""
-    err_html = f'<p class="err">{error}</p>' if error else ""
-    msg_html = f'<p class="msg">{msg}</p>' if msg else ""
+    err_html = f'<p class="auth-err">{error}</p>' if error else ""
+    msg_html = f'<p class="auth-msg">{msg}</p>' if msg else ""
     username = user.get("sub", "")
     return HTMLResponse(f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <title>certPortal Retailer — Change Password</title>
-<style>{_MEREDITH_CARD_CSS}</style></head>
-<body><div class="card">
-  <h1>certPortal &middot; Change Password</h1>
-  <p style="color:#6b7280;font-size:.85rem;margin-bottom:1.2rem">Signed in as <strong style="color:#1a1f36">{username}</strong></p>
+{_MEREDITH_AUTH_HEAD}</head>
+<body class="auth-body"><div class="auth-card auth-card--wide">
+  <h1 class="auth-title">certPortal &middot; Change Password</h1>
+  <p class="auth-subtitle">Signed in as <strong>{username}</strong></p>
   {msg_html}{err_html}
   <form method="post" action="/change-password">
-    <label>Current Password</label>
-    <input name="current_password" type="password" autocomplete="current-password" required>
-    <label>New Password (min 8 characters)</label>
-    <input name="new_password" type="password" autocomplete="new-password" required minlength="8">
-    <label>Confirm New Password</label>
-    <input name="confirm_password" type="password" autocomplete="new-password" required>
-    <button type="submit">Change Password</button>
+    <label class="auth-label">Current Password</label>
+    <input class="auth-input" name="current_password" type="password" autocomplete="current-password" required>
+    <label class="auth-label">New Password (min 8 characters)</label>
+    <input class="auth-input" name="new_password" type="password" autocomplete="new-password" required minlength="8">
+    <label class="auth-label">Confirm New Password</label>
+    <input class="auth-input" name="confirm_password" type="password" autocomplete="new-password" required>
+    <button class="auth-btn" type="submit">Change Password</button>
   </form>
-  <p class="back"><a href="/">&#8592; Back to Dashboard</a></p>
+  <p class="auth-back"><a href="/">&#8592; Back to Dashboard</a></p>
 </div></body></html>""")
 
 

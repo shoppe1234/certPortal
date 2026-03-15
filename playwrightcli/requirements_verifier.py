@@ -1497,6 +1497,71 @@ class RequirementsVerifier:
         self._skip("VIS-05", "Responsive: mobile breakpoint renders", "Deferred until Phase 9")
 
     # ------------------------------------------------------------------
+    # CSS Deprecation verification methods
+    # ------------------------------------------------------------------
+
+    async def verify_css_depr_pam_core(self, page) -> None:
+        link = await page.query_selector('link[href*="certportal-core.css"]')
+        self._record("CSS-DEPR-01", "PAM login loads certportal-core.css", link is not None)
+
+    async def verify_css_depr_pam_no_inline(self, page) -> None:
+        import re
+        html = await page.content()
+        style_blocks = re.findall(r"<style[^>]*>(.*?)</style>", html, re.DOTALL | re.IGNORECASE)
+        has_deprecated = any(
+            "#0a0e1a" in block.lower() or "#00ff88" in block.lower()
+            for block in style_blocks
+        )
+        self._record("CSS-DEPR-02", "PAM login has no deprecated inline CSS", not has_deprecated)
+
+    async def verify_css_depr_meredith_core(self, page) -> None:
+        link = await page.query_selector('link[href*="certportal-core.css"]')
+        self._record("CSS-DEPR-03", "Meredith login loads certportal-core.css", link is not None)
+
+    async def verify_css_depr_meredith_no_inline(self, page) -> None:
+        import re
+        html = await page.content()
+        style_blocks = re.findall(r"<style[^>]*>(.*?)</style>", html, re.DOTALL | re.IGNORECASE)
+        has_deprecated = any(
+            "#4f6ef7" in block.lower() or "#f8f9fc" in block.lower()
+            for block in style_blocks
+        )
+        self._record("CSS-DEPR-04", "Meredith login has no deprecated inline CSS", not has_deprecated)
+
+    async def verify_css_depr_chrissy_core(self, page) -> None:
+        link = await page.query_selector('link[href*="certportal-core.css"]')
+        self._record("CSS-DEPR-05", "Chrissy login loads certportal-core.css", link is not None)
+
+    async def verify_css_depr_chrissy_no_inline(self, page) -> None:
+        import re
+        html = await page.content()
+        style_blocks = re.findall(r"<style[^>]*>(.*?)</style>", html, re.DOTALL | re.IGNORECASE)
+        has_deprecated = any(
+            "#f59e0b" in block.lower() or "#fffbf7" in block.lower()
+            for block in style_blocks
+        )
+        self._record("CSS-DEPR-06", "Chrissy login has no deprecated inline CSS", not has_deprecated)
+
+    async def verify_css_depr_pam_forgot(self, page) -> None:
+        link = await page.query_selector('link[href*="certportal-core.css"]')
+        self._record("CSS-DEPR-07", "PAM forgot-password uses design system", link is not None)
+
+    async def verify_css_depr_tokens_active(self, page) -> None:
+        title = await page.query_selector(".auth-title")
+        btn = await page.query_selector(".auth-btn")
+        self._record(
+            "CSS-DEPR-08",
+            "All portals use design system tokens on login",
+            title is not None and btn is not None,
+        )
+
+    async def verify_css_depr_dark_mode(self, page) -> None:
+        light_bg = await page.evaluate("getComputedStyle(document.body).backgroundColor")
+        await page.evaluate('document.documentElement.setAttribute("data-theme", "dark")')
+        dark_bg = await page.evaluate("getComputedStyle(document.body).backgroundColor")
+        self._record("CSS-DEPR-09", "PAM login respects dark mode", light_bg != dark_bg)
+
+    # ------------------------------------------------------------------
     # Dispatch — route step name to verification method
     # ------------------------------------------------------------------
 
@@ -1577,6 +1642,16 @@ class RequirementsVerifier:
             "visual::dark-mode":        self.verify_vis_dark_mode,
             "visual::nav-consistency":  self.verify_vis_nav_consistency,
             "visual::responsive":       self.verify_vis_responsive,
+            # CSS Deprecation
+            "css-depr::css-depr-01-pam-login-loads-core":      self.verify_css_depr_pam_core,
+            "css-depr::css-depr-02-pam-login-no-inline":       self.verify_css_depr_pam_no_inline,
+            "css-depr::css-depr-03-meredith-login-loads-core": self.verify_css_depr_meredith_core,
+            "css-depr::css-depr-04-meredith-login-no-inline":  self.verify_css_depr_meredith_no_inline,
+            "css-depr::css-depr-05-chrissy-login-loads-core":  self.verify_css_depr_chrissy_core,
+            "css-depr::css-depr-06-chrissy-login-no-inline":   self.verify_css_depr_chrissy_no_inline,
+            "css-depr::css-depr-07-pam-forgot-no-inline":      self.verify_css_depr_pam_forgot,
+            "css-depr::css-depr-08-design-tokens-active":      self.verify_css_depr_tokens_active,
+            "css-depr::css-depr-09-pam-dark-mode":             self.verify_css_depr_dark_mode,
         }
 
         fn = dispatch.get(step)

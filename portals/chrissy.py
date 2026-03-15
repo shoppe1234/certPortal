@@ -127,34 +127,26 @@ async def health():
 
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request, error: str = ""):
-    error_html = f'<p style="color:#dc2626;margin-bottom:1rem">{error}</p>' if error else ""
+    error_html = f'<p class="auth-err">{error}</p>' if error else ""
     return HTMLResponse(f"""<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <title>certPortal Supplier — Login</title>
-  <style>
-    body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#fffbf7;color:#2d2926;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}}
-    .card{{background:#fff;padding:2.5rem;border-radius:8px;width:360px;box-shadow:0 2px 12px rgba(0,0,0,.06);border:1px solid #fef3c7}}
-    h1{{color:#f59e0b;font-size:1.4rem;margin:0 0 1.5rem}}
-    label{{display:block;font-size:.8rem;color:#6b7280;margin-bottom:.3rem;font-weight:500}}
-    input{{width:100%;box-sizing:border-box;padding:.6rem .75rem;background:#fff;border:1px solid #e5e7eb;border-radius:6px;color:#2d2926;font-size:.9rem}}
-    input:focus{{outline:none;border-color:#f59e0b;box-shadow:0 0 0 3px rgba(245,158,11,.15)}}
-    button{{width:100%;margin-top:1.2rem;padding:.75rem;background:#f59e0b;color:#fff;border:none;border-radius:6px;font-weight:600;font-size:1rem;cursor:pointer}}
-    button:hover{{background:#d97706}}
-    .sep{{margin-bottom:1rem}}
-  </style>
+  <link rel="stylesheet" href="/static/css/certportal-core.css">
+  <link rel="stylesheet" href="/static/css/portal-chrissy.css">
+  <link rel="stylesheet" href="/static/css/auth-standalone.css">
 </head>
-<body>
-<div class="card">
-  <h1>certPortal · Supplier</h1>
+<body class="auth-body">
+<div class="auth-card">
+  <h1 class="auth-title">certPortal · Supplier</h1>
   {error_html}
   <form method="post" action="/token">
-    <div class="sep"><label>Username</label><input name="username" autocomplete="username" required></div>
-    <div class="sep"><label>Password</label><input name="password" type="password" autocomplete="current-password" required></div>
-    <button type="submit">Sign in</button>
+    <div class="auth-sep"><label class="auth-label">Username</label><input class="auth-input" name="username" autocomplete="username" required></div>
+    <div class="auth-sep"><label class="auth-label">Password</label><input class="auth-input" name="password" type="password" autocomplete="current-password" required></div>
+    <button class="auth-btn" type="submit">Sign in</button>
   </form>
-  <p style="margin-top:.8rem;text-align:right;font-size:.78rem"><a href="/forgot-password" style="color:#f59e0b;text-decoration:none">Forgot password?</a></p>
+  <p class="auth-forgot"><a href="/forgot-password">Forgot password?</a></p>
 </div>
 </body>
 </html>""")
@@ -248,46 +240,33 @@ async def logout(access_token: str | None = Cookie(default=None)):
 # Open endpoints: Password reset (ADR-023)
 # ---------------------------------------------------------------------------
 
-_CHRISSY_RESET_CSS = (
-    "body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;"
-    "background:#fffbf7;color:#2d2926;display:flex;align-items:center;"
-    "justify-content:center;min-height:100vh;margin:0}"
-    ".card{background:#fff;padding:2.5rem;border-radius:8px;width:380px;"
-    "box-shadow:0 2px 12px rgba(0,0,0,.06);border:1px solid #fef3c7}"
-    "h1{color:#f59e0b;font-size:1.3rem;margin:0 0 1.5rem}"
-    "label{display:block;font-size:.8rem;color:#6b7280;margin-bottom:.25rem;font-weight:500}"
-    "input{width:100%;box-sizing:border-box;padding:.6rem .75rem;background:#fff;"
-    "border:1px solid #e5e7eb;border-radius:6px;color:#2d2926;font-size:.9rem;"
-    "margin-bottom:.9rem}"
-    "button{width:100%;margin-top:.2rem;padding:.7rem;background:#f59e0b;color:#fff;"
-    "border:none;border-radius:6px;font-weight:600;font-size:.95rem;cursor:pointer}"
-    "button:hover{background:#d97706}"
-    ".err{color:#dc2626;margin-bottom:1rem;font-size:.9rem}"
-    ".back{margin-top:1rem;font-size:.82rem}"
-    ".back a{color:#f59e0b;text-decoration:none}"
+_CHRISSY_AUTH_HEAD = (
+    '  <link rel="stylesheet" href="/static/css/certportal-core.css">\n'
+    '  <link rel="stylesheet" href="/static/css/portal-chrissy.css">\n'
+    '  <link rel="stylesheet" href="/static/css/auth-standalone.css">'
 )
 
 
 @app.get("/forgot-password", response_class=HTMLResponse)
 async def forgot_password_form(error: str = ""):
     """Render the forgot-password form (username field, supplier theme)."""
-    err_html = f'<p class="err">{error}</p>' if error else ""
+    err_html = f'<p class="auth-err">{error}</p>' if error else ""
     return HTMLResponse(f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <title>certPortal Supplier - Forgot Password</title>
-<style>{_CHRISSY_RESET_CSS}</style></head>
-<body><div class="card">
-  <h1>certPortal &middot; Forgot Password</h1>
+{_CHRISSY_AUTH_HEAD}</head>
+<body class="auth-body"><div class="auth-card">
+  <h1 class="auth-title">certPortal &middot; Forgot Password</h1>
   {err_html}
-  <p style="color:#6b7280;font-size:.85rem;margin-bottom:1.2rem">
+  <p class="auth-subtitle">
     Enter your username and we will email a reset link if an address is on file.
   </p>
   <form method="post" action="/forgot-password">
-    <label>Username</label>
-    <input name="username" autocomplete="username" required>
-    <button type="submit">Send Reset Link</button>
+    <label class="auth-label">Username</label>
+    <input class="auth-input" name="username" autocomplete="username" required>
+    <button class="auth-btn" type="submit">Send Reset Link</button>
   </form>
-  <p class="back"><a href="/login">&#8592; Back to login</a></p>
+  <p class="auth-back"><a href="/login">&#8592; Back to login</a></p>
 </div></body></html>""")
 
 
@@ -316,21 +295,21 @@ async def reset_password_form(token: str, error: str = ""):
     )
     if row is None:
         return RedirectResponse(url="/forgot-password?error=Reset+link+is+invalid+or+expired", status_code=302)
-    err_html = f'<p class="err">{error}</p>' if error else ""
+    err_html = f'<p class="auth-err">{error}</p>' if error else ""
     return HTMLResponse(f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <title>certPortal Supplier - Reset Password</title>
-<style>{_CHRISSY_RESET_CSS}</style></head>
-<body><div class="card">
-  <h1>certPortal &middot; Reset Password</h1>
+{_CHRISSY_AUTH_HEAD}</head>
+<body class="auth-body"><div class="auth-card">
+  <h1 class="auth-title">certPortal &middot; Reset Password</h1>
   {err_html}
   <form method="post" action="/reset-password">
     <input type="hidden" name="token" value="{token}">
-    <label>New Password (min 8 characters)</label>
-    <input name="new_password" type="password" autocomplete="new-password" required minlength="8">
-    <label>Confirm New Password</label>
-    <input name="confirm_password" type="password" autocomplete="new-password" required>
-    <button type="submit">Set New Password</button>
+    <label class="auth-label">New Password (min 8 characters)</label>
+    <input class="auth-input" name="new_password" type="password" autocomplete="new-password" required minlength="8">
+    <label class="auth-label">Confirm New Password</label>
+    <input class="auth-input" name="confirm_password" type="password" autocomplete="new-password" required>
+    <button class="auth-btn" type="submit">Set New Password</button>
   </form>
 </div></body></html>""")
 
@@ -615,7 +594,7 @@ async def patch_content(
     md = workspace.download(row["patch_s3_key"]).decode("utf-8")
     safe_md = md.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     return HTMLResponse(
-        f"<pre style='white-space:pre-wrap;font-family:monospace;padding:1rem'>{safe_md}</pre>"
+        f"<pre style='white-space:pre-wrap;font-family:var(--font-mono,monospace);padding:1rem'>{safe_md}</pre>"
     )
 
 
@@ -706,26 +685,6 @@ async def patch_list_partial(
 # Protected: Change password (any authenticated supplier/admin user)
 # ---------------------------------------------------------------------------
 
-_CHRISSY_CARD_CSS = """
-  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
-       background:#fffbf7;color:#2d2926;display:flex;align-items:center;
-       justify-content:center;min-height:100vh;margin:0}
-  .card{background:#fff;padding:2.5rem;border-radius:8px;width:420px;
-        box-shadow:0 2px 12px rgba(0,0,0,.06);border:1px solid #fef3c7}
-  h1{color:#f59e0b;font-size:1.3rem;margin:0 0 1.5rem}
-  label{display:block;font-size:.8rem;color:#6b7280;margin-bottom:.25rem;font-weight:500}
-  input{width:100%;box-sizing:border-box;padding:.6rem .75rem;background:#fff;
-        border:1px solid #e5e7eb;border-radius:6px;color:#2d2926;font-size:.9rem;
-        margin-bottom:.9rem}
-  input:focus{outline:none;border-color:#f59e0b;box-shadow:0 0 0 3px rgba(245,158,11,.15)}
-  button{width:100%;margin-top:.3rem;padding:.7rem;background:#f59e0b;color:#fff;
-         border:none;border-radius:6px;font-weight:600;font-size:.95rem;cursor:pointer}
-  button:hover{background:#d97706}
-  .msg{color:#16a34a;margin-bottom:1rem;font-size:.9rem}
-  .err{color:#dc2626;margin-bottom:1rem;font-size:.9rem}
-  .back{margin-top:1rem;font-size:.82rem}
-  .back a{color:#f59e0b;text-decoration:none}
-"""
 
 
 @router.get("/change-password", response_class=HTMLResponse)
@@ -736,27 +695,27 @@ async def change_password_page(
     msg: str = "",
 ):
     """Render the change-password form (supplier theme)."""
-    err_html = f'<p class="err">{error}</p>' if error else ""
-    msg_html = f'<p class="msg">{msg}</p>' if msg else ""
+    err_html = f'<p class="auth-err">{error}</p>' if error else ""
+    msg_html = f'<p class="auth-msg">{msg}</p>' if msg else ""
     username = user.get("sub", "")
     return HTMLResponse(f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <title>certPortal Supplier — Change Password</title>
-<style>{_CHRISSY_CARD_CSS}</style></head>
-<body><div class="card">
-  <h1>certPortal &middot; Change Password</h1>
-  <p style="color:#6b7280;font-size:.85rem;margin-bottom:1.2rem">Signed in as <strong style="color:#2d2926">{username}</strong></p>
+{_CHRISSY_AUTH_HEAD}</head>
+<body class="auth-body"><div class="auth-card auth-card--wide">
+  <h1 class="auth-title">certPortal &middot; Change Password</h1>
+  <p class="auth-subtitle">Signed in as <strong>{username}</strong></p>
   {msg_html}{err_html}
   <form method="post" action="/change-password">
-    <label>Current Password</label>
-    <input name="current_password" type="password" autocomplete="current-password" required>
-    <label>New Password (min 8 characters)</label>
-    <input name="new_password" type="password" autocomplete="new-password" required minlength="8">
-    <label>Confirm New Password</label>
-    <input name="confirm_password" type="password" autocomplete="new-password" required>
-    <button type="submit">Change Password</button>
+    <label class="auth-label">Current Password</label>
+    <input class="auth-input" name="current_password" type="password" autocomplete="current-password" required>
+    <label class="auth-label">New Password (min 8 characters)</label>
+    <input class="auth-input" name="new_password" type="password" autocomplete="new-password" required minlength="8">
+    <label class="auth-label">Confirm New Password</label>
+    <input class="auth-input" name="confirm_password" type="password" autocomplete="new-password" required>
+    <button class="auth-btn" type="submit">Change Password</button>
   </form>
-  <p class="back"><a href="/">&#8592; Back to Dashboard</a></p>
+  <p class="auth-back"><a href="/">&#8592; Back to Dashboard</a></p>
 </div></body></html>""")
 
 

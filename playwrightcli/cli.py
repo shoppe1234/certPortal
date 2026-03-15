@@ -82,6 +82,7 @@ async def _run_portal(
         "template":         ("playwrightcli.flows.template_flow",         "TemplateFlow"),
         "gate-model":       ("playwrightcli.flows.gate_model_flow",       "GateModelFlow"),
         "visual":           ("playwrightcli.flows.visual_regression_flow","VisualRegressionFlow"),
+        "css-depr":         ("playwrightcli.flows.css_deprecation_flow", "CssDeprecationFlow"),
     }
     module_path, class_name = flow_map[name]
     import importlib
@@ -95,7 +96,7 @@ async def _run_portal(
         try:
             # Standalone flows — no portal config or observer queue
             if name in ("scope", "rbac", "lifecycle-wizard", "layer2-wizard", "wizard-session", "health",
-                         "onboarding", "exception", "template", "gate-model", "visual"):
+                         "onboarding", "exception", "template", "gate-model", "visual", "css-depr"):
                 flow = FlowClass(page=page, runner=runner, verifier=verifier)
             else:
                 flow = FlowClass(
@@ -169,6 +170,7 @@ def _dry_run(portal_names: list[str], mm: MemoryManager, verify: bool = False) -
     from playwrightcli.flows.template_flow import TEMPLATE_STEPS
     from playwrightcli.flows.gate_model_flow import GATE_MODEL_STEPS
     from playwrightcli.flows.visual_regression_flow import VISUAL_STEPS
+    from playwrightcli.flows.css_deprecation_flow import CSS_DEPR_STEPS
 
     step_map = {
         "pam":              PAM_STEPS,
@@ -185,6 +187,7 @@ def _dry_run(portal_names: list[str], mm: MemoryManager, verify: bool = False) -
         "template":         TEMPLATE_STEPS,
         "gate-model":       GATE_MODEL_STEPS,
         "visual":           VISUAL_STEPS,
+        "css-depr":         CSS_DEPR_STEPS,
     }
 
     # Requirement IDs that will be checked per step
@@ -302,6 +305,16 @@ def _dry_run(portal_names: list[str], mm: MemoryManager, verify: bool = False) -
         "visual::dark-mode":               ["VIS-03"],
         "visual::nav-consistency":          ["VIS-04"],
         "visual::responsive":              ["VIS-05"],
+        # CSS Deprecation
+        "css-depr::css-depr-01-pam-login-loads-core":      ["CSS-DEPR-01"],
+        "css-depr::css-depr-02-pam-login-no-inline":       ["CSS-DEPR-02"],
+        "css-depr::css-depr-03-meredith-login-loads-core": ["CSS-DEPR-03"],
+        "css-depr::css-depr-04-meredith-login-no-inline":  ["CSS-DEPR-04"],
+        "css-depr::css-depr-05-chrissy-login-loads-core":  ["CSS-DEPR-05"],
+        "css-depr::css-depr-06-chrissy-login-no-inline":   ["CSS-DEPR-06"],
+        "css-depr::css-depr-07-pam-forgot-no-inline":      ["CSS-DEPR-07"],
+        "css-depr::css-depr-08-design-tokens-active":      ["CSS-DEPR-08"],
+        "css-depr::css-depr-09-pam-dark-mode":             ["CSS-DEPR-09"],
     }
 
     print("\n--- DRY RUN (no browser opened) ---\n")
@@ -358,7 +371,8 @@ def main() -> None:
         "--portal",
         choices=["pam", "meredith", "chrissy", "scope", "rbac",
                  "lifecycle-wizard", "layer2-wizard", "wizard-session", "health",
-                 "onboarding", "exception", "template", "gate-model", "visual", "all"],
+                 "onboarding", "exception", "template", "gate-model", "visual",
+                 "css-depr", "all"],
         default="all",
         help="Which portal(s) to test (default: all)",
     )
@@ -427,7 +441,7 @@ def main() -> None:
     portal_names = (
         ["pam", "meredith", "chrissy", "scope", "rbac",
          "lifecycle-wizard", "layer2-wizard", "wizard-session", "health",
-         "onboarding", "exception", "template", "gate-model", "visual"]
+         "onboarding", "exception", "template", "gate-model", "visual", "css-depr"]
         if args.portal == "all" else [args.portal]
     )
 
